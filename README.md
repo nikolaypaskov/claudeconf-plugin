@@ -74,9 +74,9 @@ Because it commits to principles rather than a fixed tool list, the same skill w
 
 ## Limitations
 
-- It **stops at a human-review gate** and never auto-commits — you approve the tools and the diff first.
+- It **stops at a human-review gate** and never auto-commits: you approve the tools and the diff first.
 - It **fills gaps additively** on existing repos (managed blocks); it will not migrate a toolchain that already works.
-- The default **SAST and secret-scan rulesets are seed-level**, not comprehensive — see [SECURITY.md](SECURITY.md). Extend them (vendor a curated pack, add CodeQL, enable server-side push protection) before relying on a green check as a guarantee.
+- The default **SAST and secret-scan rulesets are seed-level**, not comprehensive: see [SECURITY.md](SECURITY.md). Extend them (vendor a curated pack, add CodeQL, enable server-side push protection) before relying on a green check as a guarantee.
 - Stacks are research-driven; per-stack starting anchors exist for Node, Python, Elixir, Swift, and Kotlin. Other stacks work via research, with the gate-tier self-verify as the safety net.
 - The **CI security tier needs Docker** (semgrep and trufflehog run as pinned images).
 
