@@ -41,7 +41,7 @@ Run it in any project:
 
 Review the proposed tools and the diff at the gate, approve, and it commits the harness on a feature branch.
 
-If the project is new and has no code yet, claudeconf uses a brainstorming skill to capture the project's specifics first when one is available, and works through that inline otherwise.
+**New or empty project?** claudeconf works best alongside the [`superpowers:brainstorming`](https://github.com/obra/superpowers) skill — it brainstorms the project's purpose, stack, and constraints first, then generates a harness that fits those decisions. With the superpowers plugin installed, claudeconf invokes brainstorming automatically for new projects; without it, it brainstorms inline (the dedicated skill gives better results).
 
 ## What it generates
 
