@@ -1,0 +1,19 @@
+{
+  "constitutionVersion": "1",
+  "generator": "claudeconf-skill",
+  "stacks": ["node"],
+  "hookRunner": "lefthook",
+  "milestones": {
+    "format":           { "tool": "biome",      "version": "2.5.0",   "tiers": ["edit", "ci"] },
+    "lint":             { "tool": "biome",      "version": "2.5.0",   "tiers": ["pre-commit", "ci"] },
+    "typecheck":        { "tool": "tsc",        "version": "6.0.3",   "tiers": ["pre-commit", "ci"] },
+    "unit":             { "tool": "vitest",     "version": "4.1.9",   "tiers": ["pre-commit", "pre-push", "gate", "ci"] },
+    "e2e":              { "tool": "vitest",     "version": "4.1.9",   "tiers": ["gate", "ci"] },
+    "sast":             { "tool": "semgrep",    "version": "1.167.0", "tiers": ["pre-push", "gate", "ci"] },
+    "secret-scan":      { "tool": "trufflehog", "version": "3.95.6",  "tiers": ["pre-commit", "ci"] },
+    "dependency-audit": { "tool": "npm-audit",  "version": "n/a",     "tiers": ["pre-push", "gate", "ci"] },
+    "build":            { "tool": "tsup",       "version": "8.5.1",   "tiers": ["pre-push", "gate", "ci"] }
+  },
+  "ci": { "provider": "github-actions", "workflow": ".github/workflows/ci.yml" },
+  "e2e": { "framework": "vitest", "suite": "test/integration/" }
+}

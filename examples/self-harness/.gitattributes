@@ -1,0 +1,2 @@
+# Normalize line endings — protects the determinism invariant across contributor OSes.
+* text=auto eol=lf

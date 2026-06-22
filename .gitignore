@@ -1,0 +1,18 @@
+# macOS / Windows
+.DS_Store
+Thumbs.db
+
+# Editor cruft
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Logs & secrets
+*.log
+.env
+.env.*
+
+# Local Claude Code state (this repo ships .claude-plugin/, not .claude/)
+.claude/

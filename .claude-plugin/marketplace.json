@@ -1,0 +1,16 @@
+{
+  "name": "claudeconf",
+  "owner": {
+    "name": "Nikolay Paskov",
+    "email": "n.g.paskov@gmail.com"
+  },
+  "description": "claudeconf — a research-driven, technology-agnostic harness generator skill for Claude Code.",
+  "plugins": [
+    {
+      "name": "claudeconf",
+      "source": "./plugins/claudeconf",
+      "description": "Generate a pinned, technology-agnostic quality + security harness (git hooks, CI, e2e, gates) for any project.",
+      "version": "0.1.0"
+    }
+  ]
+}

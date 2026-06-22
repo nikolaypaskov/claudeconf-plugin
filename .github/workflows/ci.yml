@@ -1,0 +1,25 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  validate-examples:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: '24'
+      - name: validate example manifests (9 pinned milestones)
+        run: node scripts/validate-examples.mjs
+      - name: validate example YAML parses
+        run: |
+          for f in $(find examples \( -name '*.yml' -o -name '*.yaml' \)); do
+            ruby -ryaml -e "YAML.load_file('$f')" && echo "yaml ok: $f"
+          done
