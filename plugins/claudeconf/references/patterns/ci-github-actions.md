@@ -55,8 +55,9 @@ jobs:
         run: npm ci                                     # REPLACE: pip install … / mix deps.get / …
 
       # ── Milestone gates (tier order) — invoke project-local tools (npx/…) ───
-      - name: format check
+      - name: format check (advisory)
         run: npx biome format .                         # REPLACE with the stack formatter
+        continue-on-error: true                         # format is advisory (constitution §2)
       - name: lint
         run: npx biome lint .                           # REPLACE
       - name: typecheck
@@ -97,7 +98,7 @@ jobs:
       - name: SAST (semgrep)
         uses: docker://semgrep/semgrep:<x.y.z>
         with:
-          args: semgrep scan --error --quiet --config .claudeconf/semgrep.yml
+          args: semgrep scan --error --quiet --config .claudeconf/rules/
 ```
 
 ## Conventions

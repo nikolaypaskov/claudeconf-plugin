@@ -6,6 +6,36 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-07-17
+
+Correctness release: the skill's docs, examples, and its own harness now agree
+with each other everywhere.
+
+### Changed
+
+- **Gate ≡ CI codified** (constitution §1): the gate tier and CI run the same
+  full-scope nine-milestone battery; every milestone's default tiers now include
+  `gate` + `ci`, and constitution §1 prose matches the §2 table.
+- **Canonical SAST config** is the vendored `.claudeconf/rules/` directory; the
+  single-file `.claudeconf/semgrep.yml` seed convention is retired.
+- **Multi-stack manifests** (harness-contract §2.2.1): milestones served by a
+  different tool per stack use a per-stack `tools[]` array; the version rule now
+  rejects composite strings ("2.5.0 + 0.15.18") alongside floating ranges.
+- **Contract §3.3** checks the full gate battery, file-scoped advisory format
+  hooks, and SHA-pinned managed CI blocks with least-privilege permissions.
+- security.md: two-scope secret-scan table (changed files at pre-commit,
+  whole tree at gate/CI), vendored-dependency-tree excludes (`node_modules/`,
+  `.venv/`), and `.claudeconf/rules/` as the canonical semgrep example.
+- wiring-principles §4: documents the all-staged-files-ignored hook failure mode
+  (e.g. biome `--no-errors-on-unmatched`).
+- SKILL.md Step 5 records per-stack `tools[]` for polyglot milestones.
+
+### Fixed
+
+- ci-github-actions.md skeleton: the format step is explicitly advisory
+  (`continue-on-error`), and the SAST/secret-scan examples use the pinned
+  `.claudeconf/rules/` + `--exclude-paths` conventions.
+
 ## [0.1.0] - 2026-06-22
 
 Initial public release — the `claudeconf` skill packaged as a distributable
@@ -42,5 +72,6 @@ Claude Code plugin.
   badge, SECURITY and CONTRIBUTING docs, and issue/PR templates.
 - Self-hosted marketplace manifest, MIT license, and README.
 
-[Unreleased]: https://github.com/nikolaypaskov/claudeconf-plugin/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/nikolaypaskov/claudeconf-plugin/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/nikolaypaskov/claudeconf-plugin/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/nikolaypaskov/claudeconf-plugin/releases/tag/v0.1.0

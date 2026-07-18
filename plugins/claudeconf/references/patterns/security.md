@@ -22,8 +22,8 @@ stack.
 | Milestone | Tier | Tool | Mode | Scope |
 | --- | --- | --- | --- | --- |
 | secret-scan | pre-commit | `trufflehog filesystem` | blocking | changed files |
-| SAST | pre-push | `semgrep scan` | blocking | all |
-| SAST (gate) | gate | `semgrep scan` | blocking | all |
+| secret-scan | gate + CI | `trufflehog filesystem .` | blocking | whole tree (with `--exclude-paths`) |
+| SAST | pre-push + gate + CI | `semgrep scan` | blocking | all |
 
 ## trufflehog: required flags
 
@@ -73,12 +73,19 @@ The exclude file has two non-obvious requirements:
   `.git/config`; trufflehog flags it as an unverified GitHub secret and `--fail`
   turns every CI run red — a guaranteed false positive. Add `\.git/`.
 
-A minimal `.claudeconf/trufflehog-exclude.txt`:
+- **Exclude vendored dependency trees** (`node_modules/`, `.venv/`, `vendor/`).
+  Dependencies legitimately contain example credentials in docs and test fixtures
+  (URI-style `user:pass@` hosts in `@types/node`'s docs), and in CI the install step
+  often runs before the scan in the same job — so the tree is present when the
+  scanner walks it. Noise, not project secrets (wiring-principles §5).
+
+A minimal `.claudeconf/trufflehog-exclude.txt` (Node project):
 
 ```
 \.git/
 package-lock\.json
 \.lock$
+node_modules/
 ```
 
 ## semgrep: use a pinned offline config, never `--config auto`
@@ -87,14 +94,14 @@ package-lock\.json
 semgrep scan \
   --error           # exit non-zero on findings
   --quiet           # suppress progress output
-  --config .claudeconf/semgrep.yml   # pinned, offline ruleset
+  --config .claudeconf/rules/   # vendored, pinned, offline ruleset directory
 ```
 
-The config path `.claudeconf/semgrep.yml` is the archived prototype's convention.
-The file must be committed into the repository and pin an exact ruleset version —
-never `--config auto` or a URL that fetches rules at scan time. Using
-`--config auto` makes scan results depend on the current Semgrep registry state,
-violating the determinism invariant (constitution §4.3).
+The canonical config is the `.claudeconf/rules/` DIRECTORY of vendored rule files,
+committed into the repository and pinned to an exact source (see below) — never
+`--config auto` or a URL that fetches rules at scan time. Using `--config auto`
+makes scan results depend on the current Semgrep registry state, violating the
+determinism invariant (constitution §4.3).
 
 ### Making the SAST gate credible (not just a couple of regexes)
 
@@ -115,9 +122,8 @@ To make the SAST milestone mean something while keeping determinism:
   (not the offline pre-push tier) — a legitimate determinism-vs-coverage split to
   state openly.
 
-The `.claudeconf/semgrep.yml` shipped by default is a minimal starter: extend or
-replace it (vendor a pack, or add CodeQL) before relying on the SAST gate for
-security.
+The rules shipped by default are a minimal starter: extend or replace them (vendor
+a pack, or add CodeQL) before relying on the SAST gate for security.
 
 ## Scope guard (pentest / security context only)
 

@@ -87,6 +87,13 @@ Exclude:
 Use the tool's own ignore mechanism (an `includes` / `ignore` field, or the VCS
 ignore file) scoped to the project's real source.
 
+The exclusion interacts with staged-files hooks: a changed-files job can hand the
+tool a list where EVERY file is ignored by its config, and many tools treat "no
+files processed" as an ERROR (biome exits non-zero unless invoked with
+`--no-errors-on-unmatched`), failing the hook on an innocent commit. Wire the
+tool's unmatched-files escape hatch (or narrow the runner's glob) so an
+all-ignored file list is a no-op, not a failure.
+
 ## 5. Whole-tree security scanners exclude VCS metadata and vendored paths
 
 A secret scan or SAST pass that runs over the WHOLE tree in CI (not just changed

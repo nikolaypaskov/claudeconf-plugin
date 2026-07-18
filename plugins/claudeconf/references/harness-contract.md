@@ -20,7 +20,7 @@ a contract violation; the skill must abort with an error listing the missing art
 | **Dependency-update config** | `.github/dependabot.yml` OR `renovate.json` | The upgrade path for a pin-everything harness — keeps pinned deps and SHA-pinned actions fresh. Covers the project's package ecosystem(s) + `github-actions`. |
 | **Edit-tier hook** | Entry in `.claude/settings.json` (hook block) | Wires the `format` milestone into Claude Code's edit hook. Non-blocking, silent on success. Must also include a scope guard entry if the harness is generated for a pentest engagement. |
 | **E2E scaffold + config** | e2e suite directory + framework config file (suite path fits the project's interface — `e2e/` for a UI, the integration-test dir for a CLI/service) | Must run unattended with no live external credentials. Framework + suite recorded in manifest. |
-| **Pinned tool configs** | One config file per tool used by a milestone | e.g. `biome.json`, `vitest.config.ts`, `playwright.config.ts`, `.semgrep.yml`. Each config pins the tool version via the project lock file or an explicit version field. |
+| **Pinned tool configs** | One config file per tool used by a milestone | e.g. `biome.json`, `vitest.config.ts`, `playwright.config.ts`, and the vendored SAST ruleset directory `.claudeconf/rules/` (pinned rule files committed into the repo — see `patterns/security.md`). Each config pins the tool version via the project lock file or an explicit version field. |
 | **Repo hygiene** | `.editorconfig`, `.gitattributes` (`* text=auto eol=lf`), `.github/CODEOWNERS` | Baseline staples: consistent editor settings, normalized line endings (protects the determinism invariant), and code ownership. After generation, print a checklist to enable branch protection / required status checks — the harness can scaffold files but not change GitHub settings. |
 | **Manifest** | `.claudeconf/manifest.json` | See §2 for the complete schema. |
 
@@ -61,20 +61,44 @@ deliberate change; do not present generation itself as byte-stable.
   "stacks": ["node"],
   "hookRunner": "lefthook",
   "milestones": {
-    "format":          { "tool": "biome",     "version": "2.5.0", "tiers": ["edit"] },
-    "lint":            { "tool": "biome",     "version": "2.5.0", "tiers": ["pre-commit"] },
-    "typecheck":       { "tool": "tsc",       "version": "x.y.z", "tiers": ["pre-commit"] },
-    "unit":            { "tool": "vitest",    "version": "x.y.z", "tiers": ["pre-commit","pre-push"] },
+    "format":          { "tool": "biome",     "version": "2.5.0", "tiers": ["edit","gate","ci"] },
+    "lint":            { "tool": "biome",     "version": "2.5.0", "tiers": ["pre-commit","gate","ci"] },
+    "typecheck":       { "tool": "tsc",       "version": "x.y.z", "tiers": ["pre-commit","gate","ci"] },
+    "unit":            { "tool": "vitest",    "version": "x.y.z", "tiers": ["pre-commit","pre-push","gate","ci"] },
     "e2e":             { "tool": "playwright","version": "x.y.z", "tiers": ["gate","ci"] },
-    "sast":            { "tool": "semgrep",   "version": "x.y.z", "tiers": ["pre-push","ci"] },
-    "secret-scan":     { "tool": "trufflehog","version": "x.y.z", "tiers": ["pre-commit"] },
-    "dependency-audit":{ "tool": "npm-audit", "version": "n/a",   "tiers": ["pre-push","ci"] },
-    "build":           { "tool": "tsup",      "version": "x.y.z", "tiers": ["pre-push","ci"] }
+    "sast":            { "tool": "semgrep",   "version": "x.y.z", "tiers": ["pre-push","gate","ci"] },
+    "secret-scan":     { "tool": "trufflehog","version": "x.y.z", "tiers": ["pre-commit","gate","ci"] },
+    "dependency-audit":{ "tool": "npm-audit", "version": "n/a",   "tiers": ["pre-push","gate","ci"] },
+    "build":           { "tool": "tsup",      "version": "x.y.z", "tiers": ["pre-push","gate","ci"] }
   },
   "ci": { "provider": "github-actions", "workflow": ".github/workflows/ci.yml" },
   "e2e": { "framework": "playwright", "suite": "e2e/" }
 }
 ```
+
+Every milestone's `tiers` includes `gate` and `ci` — the Gate ≡ CI rule
+(constitution §1).
+
+### 2.2.1 Multi-stack milestones (polyglot projects)
+
+When one milestone is served by a DIFFERENT tool per stack, the entry uses a
+per-stack `tools` array INSTEAD of the top-level `tool`/`version` pair. Never join
+tools or versions into one string (`"biome + ruff"` is malformed):
+
+```json
+"lint": {
+  "tools": [
+    { "stack": "node",   "tool": "biome", "version": "2.5.0"   },
+    { "stack": "python", "tool": "ruff",  "version": "0.15.18" }
+  ],
+  "tiers": ["pre-commit","gate","ci"]
+}
+```
+
+Each `tools[]` element obeys the same `tool`/`version` field rules as a single-tool
+entry. `e2e.framework` follows the same principle (an array of
+`{ "stack", "framework" }` objects), and `e2e.suite` may be an array of suite paths —
+one per stack.
 
 ### 2.3 Field rules
 
@@ -85,11 +109,11 @@ deliberate change; do not present generation itself as byte-stable.
 | `stacks` | One or more stack identifiers detected by the skill. Non-empty array. |
 | `hookRunner` | `"lefthook"` (default) or the ecosystem-standard runner name. |
 | `milestones` | MUST contain exactly the nine milestone keys listed in §2.2. No milestone may be absent. |
-| `milestones[*].tool` | Exact tool name used. |
-| `milestones[*].version` | Exact pinned version string (or `"n/a"` for tools that version through the runtime, e.g. `npm-audit`). Floating ranges are forbidden. |
-| `milestones[*].tiers` | Non-empty array. Each entry must be one of: `"edit"`, `"pre-commit"`, `"pre-push"`, `"gate"`, `"ci"`. Must cover at least the default tier(s) from constitution §2. |
+| `milestones[*].tool` | Exact tool name used. A single-tool entry has `tool` + `version`; a multi-stack entry has `tools[]` instead (§2.2.1) — never both, never a joined string. |
+| `milestones[*].version` | Exact pinned version string (or `"n/a"` for tools that version through the runtime, e.g. `npm-audit`). Floating ranges are forbidden, and so are composite strings — a version must not contain spaces or `+`. Applies to every `tools[]` element too. |
+| `milestones[*].tiers` | Non-empty array. Each entry must be one of: `"edit"`, `"pre-commit"`, `"pre-push"`, `"gate"`, `"ci"`. Must cover at least the default tier(s) from constitution §2 (which include `gate` + `ci` for every milestone). |
 | `ci.workflow` | Path to the CI workflow file, relative to the repository root. |
-| `e2e.suite` | Path to the e2e suite directory, relative to the repository root. |
+| `e2e.suite` | Path to the e2e suite directory, relative to the repository root — or an array of paths for a multi-stack project (§2.2.1). |
 
 ---
 
@@ -104,10 +128,12 @@ considered complete until all checks pass.
 - [ ] `.claudeconf/manifest.json` exists and is valid JSON.
 - [ ] All nine milestone keys are present: `format`, `lint`, `typecheck`, `unit`,
   `e2e`, `sast`, `secret-scan`, `dependency-audit`, `build`.
-- [ ] Every milestone entry has a non-empty `tool` field.
-- [ ] Every milestone entry has a `version` field that is not a floating range
-  (must not match `/[\^~><=*xX]/` except for the literal string `"n/a"`).
-  Wildcard version segments such as `5.x` or `1.X` are NOT valid pinned versions.
+- [ ] Every milestone entry has a non-empty `tool` field, or a non-empty `tools[]`
+  array whose every element has non-empty `stack` + `tool` (multi-stack form, §2.2.1).
+- [ ] Every `version` (top-level and inside `tools[]`) is not a floating range or a
+  composite (must not match `/[\^~><=*xX+ ]/` except for the literal string `"n/a"`).
+  Wildcard segments such as `5.x` and joined strings such as `"2.5.0 + 0.15.18"` are
+  NOT valid pinned versions.
 - [ ] Every milestone's tool+version pair is CONFIRMED to exist on its registry (e.g.
   `npm view <pkg>@<version> version`), not merely well-formed. A pinned name/version
   that cannot be confirmed is a hard error — it may be a hallucinated or squattable
@@ -132,8 +158,14 @@ considered complete until all checks pass.
 - [ ] Every milestone listed in `milestones` is wired into every tier in its
   `tiers` array — i.e. the git-hook config has an entry for each `pre-commit` /
   `pre-push` milestone, and the CI workflow has a step for each `ci` milestone.
+- [ ] The gate group carries the FULL battery (Gate ≡ CI, constitution §1): format
+  check, lint, typecheck, unit + coverage, e2e, SAST, whole-tree secret scan,
+  dependency audit, build — the same set the CI workflow runs.
 - [ ] The `format` milestone is wired into the `.claude/settings.json` edit hook
-  and NOT into the git-hook config's blocking tiers (it is advisory-only at edit).
+  (file-scoped autofix on the edited file — never a whole-project reformat) and is
+  advisory at every tier: NOT in the git-hook config's blocking pre-commit/pre-push
+  groups, and non-blocking in gate/CI check mode (`|| true` /
+  `continue-on-error: true`).
 - [ ] The `e2e` milestone is present in the CI workflow and in the gate tier of
   the git-hook config (or a separate gate script).
 - [ ] Supply-chain hardening of the CI workflow: every `uses:` is pinned to a full

@@ -16,13 +16,19 @@ time budget; checks must be placed at the appropriate tier.
 | --- | --- | --- | --- | --- |
 | **edit** | Format + fast auto-fix on the edited file. Silent on success, never blocks. | < 1 s | advisory (autofix) | changed |
 | **pre-commit** | Lint, typecheck, secret scan, and unit tests for changed files. | seconds | blocking | changed |
-| **pre-push** | Full typecheck, full unit suite, SAST, dependency audit. | tens of seconds | blocking | all |
-| **gate** | Full tests + coverage, full SAST, license/dependency review. | minutes | blocking | all |
-| **CI** | Mirrors gate; runs on every push to the remote. Authoritative pass/fail signal. | minutes | blocking | all |
+| **pre-push** | Full unit suite, SAST, dependency audit, build. | tens of seconds | blocking | all |
+| **gate** | The full battery — every milestone at full scope (see §2). | minutes | blocking | all |
+| **CI** | Runs the SAME set as gate on every push to the remote. Authoritative pass/fail signal. | minutes | blocking | all |
 
 **edit is always non-blocking and silent on success.** A failing autofix at the edit
 tier must not interrupt the developer's flow; it is logged only when the tool exits
 non-zero with output.
+
+**Gate ≡ CI.** The gate tier and CI run the same full-scope milestone set; CI is the
+remote, authoritative enforcement of the local gate. Anything that can only fail at
+full scope (coverage providers, whole-tree scans, e2e) must therefore fail locally at
+the gate first, never for the first time in CI. Every milestone lists both `gate` and
+`ci` in its manifest `tiers`.
 
 ---
 
@@ -34,19 +40,19 @@ the harness must emit a prominent warning at the relevant tier rather than omitt
 
 | Milestone | Default tier(s) | Mode |
 | --- | --- | --- |
-| format | edit | advisory (autofix) |
-| lint | pre-commit | blocking |
-| typecheck | pre-commit | blocking |
-| unit | pre-commit (changed) + pre-push (full) | blocking |
+| format | edit (autofix) + gate + CI (check mode) | advisory |
+| lint | pre-commit + gate + CI | blocking |
+| typecheck | pre-commit + gate + CI | blocking |
+| unit | pre-commit (changed) + pre-push (full) + gate + CI (full + coverage) | blocking |
 | e2e | gate + CI | blocking |
-| SAST | pre-push + CI | blocking |
-| secret-scan | pre-commit | blocking |
-| dependency-audit | pre-push + CI | advisory |
-| build | pre-push + CI | blocking |
+| SAST | pre-push + gate + CI | blocking |
+| secret-scan | pre-commit (changed) + gate + CI (whole tree) | blocking |
+| dependency-audit | pre-push + gate + CI | advisory |
+| build | pre-push + gate + CI | blocking |
 
 "Default tier(s)" means the placement a harness uses when no project-specific reason
-exists to move a milestone. Tiers may be shifted up (earlier, stricter) but never
-removed.
+exists to move a milestone. Every milestone includes gate + CI (the Gate ≡ CI rule,
+§1). Tiers may be shifted up (earlier, stricter) but never removed.
 
 ---
 

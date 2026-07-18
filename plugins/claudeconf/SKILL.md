@@ -108,8 +108,11 @@ hallucinated or squattable — treat it as a hard error, do not pin it
 (`wiring-principles.md` §7).
 
 This set of decisions IS the `.claudeconf/manifest.json` content (schema in
-harness-contract.md §2). Keep the manifest free of volatile fields — no timestamps, no
-dates, no random seeds — so re-running on the same choices yields a byte-identical file.
+harness-contract.md §2). When a milestone uses a different tool per stack (polyglot
+project), record a per-stack `tools[]` array (harness-contract.md §2.2.1) — never a
+joined string like `"biome + ruff"`. Keep the manifest free of volatile fields — no
+timestamps, no dates, no random seeds — so re-running on the same choices yields a
+byte-identical file.
 
 ## Step 6 — Wire the artifacts (idempotent, managed blocks)
 
