@@ -6,6 +6,51 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-18
+
+Policy & provenance release (constitution profile 2), scoped and adversarially
+reviewed with a second-model judge. Theme: recording a version is not the same
+as executing it.
+
+### Added
+
+- **Constitution §4.6 — supply-chain admission**: registry dependencies observe a
+  release-age quarantine on every resolution/update path the ecosystem supports
+  (package-manager minimum-release-age AND updater cooldown); dependency
+  lifecycle scripts are denied by default where auditable allowlisting exists;
+  exceptions are recorded with an emergency-bypass route. Security updates
+  bypass the quarantine.
+- **Constitution §6 — versioning & migration**: `constitution-version` is a
+  machine-readable conformance profile with explicit bump rules; existing
+  harnesses stay valid against their recorded profile ("upgrade available",
+  never "invalid"); migration is regenerate → verify → approve → bump.
+- **Contract: frozen dependency graphs** — committed lockfiles generated with the
+  pinned package manager, frozen installs only (`npm ci`, `uv sync --locked`),
+  no fresh-resolution fallback.
+- **Contract: workflow auditors** — the CI workflow is itself a supply-chain
+  artifact, checked by a pinned syntax auditor + security auditor recorded in
+  the manifest's `ci.auditors` (GitHub Actions anchors: actionlint + zizmor,
+  blocking at medium severity), run in CI and the local gate.
+- **Contract: gate-tier version assertions** for globally-installed hook tools —
+  hard-fail on mismatch or unparsable `--version` output.
+- **Contract: SAST rules provenance** — `milestones.sast.rules`
+  {source, ref, license}; third-party packs need a real source + immutable ref.
+- **wiring-principles §8 — "Execute the bits you pinned"**: frozen installs,
+  digest-pinned images, version assertions.
+
+### Changed
+
+- Docker-image actions are pinned by immutable `@sha256:` digest — exact tags
+  are mutable and no longer acceptable.
+- `constitutionVersion` is now `"2"` (consolidates the v0.1.1 tier tightening).
+- ci-github-actions.md: `persist-credentials: false` on checkouts, pinned npm
+  floor for `min-release-age`, workflow-audit job skeleton.
+- node.md / python.md: §4.6 instantiations (npm/pnpm quarantine + script
+  controls; uv frozen sync; Dependabot cooldown as Python's quarantine path),
+  Biome feature-floor phrasing, prek/ty researched notes.
+- security.md: rules-provenance guidance and researched-alternative notes
+  (Opengrep, Betterleaks) with an explicit promotion bar.
+
 ## [0.1.1] - 2026-07-17
 
 Correctness release: the skill's docs, examples, and its own harness now agree
@@ -72,6 +117,7 @@ Claude Code plugin.
   badge, SECURITY and CONTRIBUTING docs, and issue/PR templates.
 - Self-hosted marketplace manifest, MIT license, and README.
 
-[Unreleased]: https://github.com/nikolaypaskov/claudeconf-plugin/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/nikolaypaskov/claudeconf-plugin/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/nikolaypaskov/claudeconf-plugin/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/nikolaypaskov/claudeconf-plugin/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/nikolaypaskov/claudeconf-plugin/releases/tag/v0.1.0

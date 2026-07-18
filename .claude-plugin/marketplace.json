@@ -10,7 +10,7 @@
       "name": "claudeconf",
       "source": "./plugins/claudeconf",
       "description": "Generate a pinned, technology-agnostic quality + security harness (git hooks, CI, e2e, gates) for any project.",
-      "version": "0.1.1"
+      "version": "0.2.0"
     }
   ]
 }

@@ -38,3 +38,20 @@ Mined from `src/policy/catalog/python.ts` in the `cli-prototype` tag.
 - **Hook runner**: `pre-commit` (the Python tool) is the ecosystem-standard
   runner. Use it if the project already has `.pre-commit-config.yaml` and all
   three criteria in `constitution.md §5` hold; otherwise default to lefthook.
+  **prek** (the Rust `pre-commit` rewrite, same config format; adopted by CPython/
+  FastAPI/Airflow) may be PRESERVED where a project already uses it explicitly — a
+  bare `.pre-commit-config.yaml` alone does not select prek, and `pre-commit`-style
+  runners populate hook environments from the network on a cold cache, so
+  provisioning must be prewarmed to keep the no-runtime-fetch invariant
+  (constitution §4.2).
+- **Supply-chain admission (constitution §4.6), Python instantiation:** pip/uv have
+  no native minimum-release-age setting, so the Dependabot/Renovate `cooldown`
+  block carries the quarantine for the update path — record that install-path
+  limitation per §4.6.2. Wheels do not execute install scripts; sdist builds do
+  execute build backends, which is inherent to source installation (record, don't
+  pretend to block). Commit the lock (`uv.lock`/`requirements.txt` with hashes) and
+  install frozen (`uv sync --locked` / `pip install --require-hashes`).
+- **ty** (Astral's type checker) is pre-1.0: an exact pin is perfectly
+  deterministic, but beta maturity makes it unsuitable as the default BLOCKING
+  typechecker — preserve it where already adopted, or offer as explicit
+  opt-in/advisory alongside mypy/pyright.

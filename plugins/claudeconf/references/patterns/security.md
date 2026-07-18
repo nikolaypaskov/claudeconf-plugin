@@ -116,6 +116,12 @@ To make the SAST milestone mean something while keeping determinism:
   coverage. Prefer AST `pattern:`/`patterns:` rules over `pattern-regex`. Do NOT
   block on audit-style packs (e.g. `p/security-audit` / `r2c-security-audit`) —
   they are high-false-positive by design and meant for monitor mode, not a gate.
+- **Record rule provenance.** Every vendored rules file carries a header comment
+  naming its source and license, and the manifest's `milestones.sast.rules` field
+  (contract §2.3) records `{source, ref, license}`. Third-party packs need the real
+  repo URL + an immutable commit; `"hand-authored"` is only for rules written in
+  this repository. Engine choice does not change the rules' license — audit
+  provenance separately from the scanner.
 - **Or add CodeQL at the CI tier.** For deep dataflow on JS/TS/Python, GitHub
   CodeQL outclasses a hand-rolled ruleset. Its query packs are versioned but not
   air-gapped-deterministic the way a vendored directory is, so it fits the CI tier
@@ -124,6 +130,24 @@ To make the SAST milestone mean something while keeping determinism:
 
 The rules shipped by default are a minimal starter: extend or replace them (vendor
 a pack, or add CodeQL) before relying on the SAST gate for security.
+
+## Researched alternatives (notes, not defaults)
+
+Current research candidates the generator may weigh per project — none is the
+default until it clears the promotion bar (checksum/signature-pinned install on the
+target platforms, offline execution, finding-equivalence spot checks across the
+supported stacks, identical local/CI bits):
+
+- **Opengrep** (LGPL fork of semgrep, ~v1.25.x): restores cross-function taint in
+  the free tier and runs semgrep-format rules unmodified. Ships signed release
+  binaries only (no brew/pip/official image), so pinned provisioning is manual.
+  Rule compatibility is syntax-level — verify finding/exit-code equivalence on the
+  project's own rules before switching engines.
+- **Betterleaks** (~v1.6.x, MIT, by gitleaks' original author; gitleaks is in
+  maintenance mode): a fast pattern scanner worth considering at pre-commit ONLY
+  when the trufflehog staged-files scan measurably exceeds the seconds-tier
+  budget. Two scanners mean two configs and suppression drift — keep one scanner
+  at both scopes until latency data argues otherwise.
 
 ## Scope guard (pentest / security context only)
 

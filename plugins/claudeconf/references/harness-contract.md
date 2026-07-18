@@ -16,12 +16,13 @@ a contract violation; the skill must abort with an error listing the missing art
 | Artifact | Path (project-relative) | Notes |
 | --- | --- | --- |
 | **Git-hook config** | `lefthook.yml` OR `.pre-commit-config.yaml` | Default is `lefthook.yml`. An ecosystem-standard runner may be used only when all three criteria in constitution §5 are satisfied. |
-| **CI workflow** | `.github/workflows/ci.yml` | Must mirror the gate tier. Authoritative pass/fail signal for pull requests. SHA-pin every action (constitution §4.1). |
-| **Dependency-update config** | `.github/dependabot.yml` OR `renovate.json` | The upgrade path for a pin-everything harness — keeps pinned deps and SHA-pinned actions fresh. Covers the project's package ecosystem(s) + `github-actions`. |
+| **CI workflow** | `.github/workflows/ci.yml` | Must mirror the gate tier. Authoritative pass/fail signal for pull requests. SHA-pin every action; docker-image actions by `@sha256:` digest (constitution §4.1). The workflow is itself a supply-chain artifact: it must be checked by a PINNED syntax auditor and a PINNED security auditor for the CI provider (recorded in the manifest's `ci.auditors`; for GitHub Actions the current researched anchors are actionlint + zizmor — see `patterns/ci-github-actions.md`). |
+| **Dependency-update config** | `.github/dependabot.yml` OR `renovate.json` | The upgrade path for a pin-everything harness — keeps pinned deps and SHA-pinned actions fresh. Covers the project's package ecosystem(s) + `github-actions`, and includes a release-age **cooldown** block (constitution §4.6). Pair it with the package manager's own minimum-release-age setting where the ecosystem has one — updater-side cooldown alone leaves the install path open. |
+| **Dependency lockfile + frozen installs** | The ecosystem's lockfile (`package-lock.json`, `pnpm-lock.yaml`, `uv.lock`, `Gemfile.lock`, …) | Committed wherever the ecosystem supports one, generated with the pinned package-manager version. Every install in hooks/CI uses the FROZEN mode (`npm ci`, `pnpm install --frozen-lockfile`, `uv sync --locked`, …) with NO fallback to fresh resolution — `npm ci \|\| npm install` silently re-resolves the tree (constitution §4.3/§4.6). |
 | **Edit-tier hook** | Entry in `.claude/settings.json` (hook block) | Wires the `format` milestone into Claude Code's edit hook. Non-blocking, silent on success. Must also include a scope guard entry if the harness is generated for a pentest engagement. |
 | **E2E scaffold + config** | e2e suite directory + framework config file (suite path fits the project's interface — `e2e/` for a UI, the integration-test dir for a CLI/service) | Must run unattended with no live external credentials. Framework + suite recorded in manifest. |
 | **Pinned tool configs** | One config file per tool used by a milestone | e.g. `biome.json`, `vitest.config.ts`, `playwright.config.ts`, and the vendored SAST ruleset directory `.claudeconf/rules/` (pinned rule files committed into the repo — see `patterns/security.md`). Each config pins the tool version via the project lock file or an explicit version field. |
-| **Repo hygiene** | `.editorconfig`, `.gitattributes` (`* text=auto eol=lf`), `.github/CODEOWNERS` | Baseline staples: consistent editor settings, normalized line endings (protects the determinism invariant), and code ownership. After generation, print a checklist to enable branch protection / required status checks — the harness can scaffold files but not change GitHub settings. |
+| **Repo hygiene** | `.editorconfig`, `.gitattributes` (`* text=auto eol=lf`), `.github/CODEOWNERS` | Baseline staples: consistent editor settings, normalized line endings (protects the determinism invariant), and code ownership. After generation, print a checklist to enable branch protection / required status checks (rulesets preferred). A generated ruleset JSON is OPTIONAL desired-state input that a human must review and import — its existence never implies protection is applied; the harness cannot change GitHub settings. |
 | **Manifest** | `.claudeconf/manifest.json` | See §2 for the complete schema. |
 
 ### 1.1 Scope guard (pentest context only)
@@ -56,7 +57,7 @@ deliberate change; do not present generation itself as byte-stable.
 
 ```json
 {
-  "constitutionVersion": "1",
+  "constitutionVersion": "2",
   "generator": "claudeconf-skill",
   "stacks": ["node"],
   "hookRunner": "lefthook",
@@ -66,12 +67,20 @@ deliberate change; do not present generation itself as byte-stable.
     "typecheck":       { "tool": "tsc",       "version": "x.y.z", "tiers": ["pre-commit","gate","ci"] },
     "unit":            { "tool": "vitest",    "version": "x.y.z", "tiers": ["pre-commit","pre-push","gate","ci"] },
     "e2e":             { "tool": "playwright","version": "x.y.z", "tiers": ["gate","ci"] },
-    "sast":            { "tool": "semgrep",   "version": "x.y.z", "tiers": ["pre-push","gate","ci"] },
+    "sast":            { "tool": "semgrep",   "version": "x.y.z", "tiers": ["pre-push","gate","ci"],
+                         "rules": { "source": "hand-authored", "ref": "n/a", "license": "MIT" } },
     "secret-scan":     { "tool": "trufflehog","version": "x.y.z", "tiers": ["pre-commit","gate","ci"] },
     "dependency-audit":{ "tool": "npm-audit", "version": "n/a",   "tiers": ["pre-push","gate","ci"] },
     "build":           { "tool": "tsup",      "version": "x.y.z", "tiers": ["pre-push","gate","ci"] }
   },
-  "ci": { "provider": "github-actions", "workflow": ".github/workflows/ci.yml" },
+  "ci": {
+    "provider": "github-actions",
+    "workflow": ".github/workflows/ci.yml",
+    "auditors": [
+      { "tool": "actionlint", "version": "x.y.z" },
+      { "tool": "zizmor",     "version": "x.y.z" }
+    ]
+  },
   "e2e": { "framework": "playwright", "suite": "e2e/" }
 }
 ```
@@ -104,7 +113,7 @@ one per stack.
 
 | Field | Rule |
 | --- | --- |
-| `constitutionVersion` | MUST match the version heading in `constitution.md`. Currently `"1"`. |
+| `constitutionVersion` | MUST match the machine-readable `constitution-version` marker at the top of `constitution.md`. Currently `"2"` (see constitution §6 for bump/migration semantics). |
 | `generator` | Fixed string `"claudeconf-skill"`. |
 | `stacks` | One or more stack identifiers detected by the skill. Non-empty array. |
 | `hookRunner` | `"lefthook"` (default) or the ecosystem-standard runner name. |
@@ -113,6 +122,8 @@ one per stack.
 | `milestones[*].version` | Exact pinned version string (or `"n/a"` for tools that version through the runtime, e.g. `npm-audit`). Floating ranges are forbidden, and so are composite strings — a version must not contain spaces or `+`. Applies to every `tools[]` element too. |
 | `milestones[*].tiers` | Non-empty array. Each entry must be one of: `"edit"`, `"pre-commit"`, `"pre-push"`, `"gate"`, `"ci"`. Must cover at least the default tier(s) from constitution §2 (which include `gate` + `ci` for every milestone). |
 | `ci.workflow` | Path to the CI workflow file, relative to the repository root. |
+| `ci.auditors` | Non-empty array of `{ "tool", "version" }` — the pinned SYNTAX auditor and SECURITY auditor for the CI provider's workflow format (constitution §4.1 applied to the workflow itself). Versions obey the same pin rules as milestones. Auditors are recorded here, never as a tenth milestone. |
+| `milestones.sast.rules` | OPTIONAL provenance for the vendored SAST ruleset: `{ "source", "ref", "license" }`. Rules copied from a third-party pack MUST record the real source URL and an immutable commit `ref`; `"source": "hand-authored"` + `"ref": "n/a"` are valid ONLY for rules authored in this repository — never as an escape hatch for vendored content. |
 | `e2e.suite` | Path to the e2e suite directory, relative to the repository root — or an array of paths for a multi-stack project (§2.2.1). |
 
 ---
@@ -152,6 +163,15 @@ considered complete until all checks pass.
 - [ ] E2E scaffold exists: the suite directory recorded in `manifest.e2e.suite`
   is non-empty and contains at least one test file.
 - [ ] Pinned tool configs exist for every tool referenced in the manifest.
+- [ ] Dependency-update config exists (`.github/dependabot.yml` or `renovate.json`)
+  and contains a cooldown block (constitution §4.6).
+- [ ] The ecosystem lockfile is committed (where the ecosystem supports one), and
+  every install command in hooks/CI uses the frozen mode with no fresh-resolution
+  fallback.
+- [ ] Repo-hygiene staples exist: `.editorconfig`, `.gitattributes`,
+  `.github/CODEOWNERS`.
+- [ ] The whole-tree scanner exclude file exists (e.g.
+  `.claudeconf/trufflehog-exclude.txt`) and covers VCS metadata + vendored trees.
 
 ### 3.3 Milestone wiring
 
@@ -169,9 +189,14 @@ considered complete until all checks pass.
 - [ ] The `e2e` milestone is present in the CI workflow and in the gate tier of
   the git-hook config (or a separate gate script).
 - [ ] Supply-chain hardening of the CI workflow: every `uses:` is pinned to a full
-  40-character commit SHA (not a tag like `@v4`); docker-image actions are pinned by an
-  exact image tag; the workflow sets a least-privilege top-level `permissions:` block
-  (`contents: read`, escalated per-job only as needed). (Constitution §4.1.)
+  40-character commit SHA (not a tag like `@v4`); docker-image actions are pinned by
+  an immutable `@sha256:` DIGEST — an exact tag is mutable and not acceptable; a
+  trailing comment records the human-readable version. The workflow sets a
+  least-privilege top-level `permissions:` block (`contents: read`, escalated
+  per-job only as needed). (Constitution §4.1.)
+- [ ] Every `ci.auditors` entry is wired: the pinned workflow syntax auditor and
+  security auditor run against the CI workflow in CI itself AND in the local gate
+  (malformed YAML must be caught before the workflow is the thing that can't run).
 
 ### 3.4 Executable run — pre-commit AND gate tiers
 
@@ -195,6 +220,13 @@ considered complete until all checks pass.
   checkout token) behaves unlike the changed-files scan. Run the gate sequence
   (e.g. `lefthook run gate`, or each CI command) and confirm exit 0 BEFORE the
   human-review gate — surface CI failures now, not on first push.
+- [ ] The gate includes a VERSION-ASSERTION step for every globally-installed tool
+  the hooks invoke by bare name (scanners, auditors): parse `tool --version` and
+  hard-fail on a mismatch with the manifest pin OR on unparsable output. This is
+  version ENFORCEMENT, not binary provenance — it proves the executing binary is
+  the recorded version, closing the "recorded 1.2.3, executing 1.4.0" gap.
+  (Checksum/Sigstore-pinned provisioning is the stronger bar, tracked for a later
+  profile.)
 
 ### 3.5 Idempotency (no-op re-generation)
 
@@ -221,4 +253,6 @@ This contract operationalises the constitution:
 | §4.3 Deterministic | §2.1 determinism rule (no volatile fields) |
 | §4.4 Idempotent | §3.5 no-op re-generation check |
 | §4.5 Scope guard | §1.1 scope guard artifact; §3.2 scope guard existence check |
+| §4.6 Supply-chain admission | §1 dependency-update + lockfile rows; §3.2 cooldown/lockfile checks |
 | §5 Hook-Runner Rule | §2.3 `hookRunner` field; §1 git-hook config note |
+| §6 Versioning & Migration | §2.3 `constitutionVersion` field rule |

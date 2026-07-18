@@ -145,3 +145,33 @@ authoritative registry:
 
 Treat a name or version that cannot be confirmed as a hard error: do not pin it. This
 check is cheap and closes the gap between "research said X" and "X is real."
+
+## 8. Execute the bits you pinned
+
+Recording a version proves nothing about what actually runs. Three gaps recur, and
+each has a mechanical close:
+
+- **Fresh resolution behind a pinned facade.** An install without the lockfile's
+  frozen mode re-resolves transitive dependencies at run time — `npm install`
+  instead of `npm ci`, `pip install` instead of a locked sync. Worse is a silent
+  fallback (`npm ci || npm install`): the pipeline stays green while quietly
+  switching to fresh resolution. Commit the lockfile (generated with the pinned
+  package-manager version) and use ONLY the frozen mode, with no fallback.
+
+  | Ecosystem | Frozen install |
+  | --- | --- |
+  | npm | `npm ci` |
+  | pnpm | `pnpm install --frozen-lockfile` |
+  | Python (uv) | `uv sync --locked` |
+  | Ruby | `bundle install --frozen` / `BUNDLE_FROZEN=true` |
+  | Rust | `cargo build --locked` |
+
+- **Mutable image tags.** A docker image tag (`tool:1.2.3`) can be repointed just
+  like a git tag. Pin images by immutable `@sha256:` digest and record the
+  human-readable tag in a comment for the updater to bump.
+- **Untracked global binaries.** A hook that invokes a globally-installed scanner
+  by bare name executes whatever version the machine happens to have — the manifest
+  pin is a claim, not a control. Add a gate-tier assertion that parses each such
+  tool's `--version` and hard-fails on a mismatch with the manifest OR on output it
+  cannot parse. (This is version enforcement; checksum/Sigstore-verified
+  provisioning is the stronger control where the effort is warranted.)

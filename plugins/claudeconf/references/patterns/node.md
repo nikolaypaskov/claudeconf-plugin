@@ -48,3 +48,21 @@ Mined from `src/policy/catalog/node.ts` in the `cli-prototype` tag.
   (e.g. `npx @cyclonedx/cyclonedx-npm --output-file sbom.json`) and attach build
   provenance with `actions/attest-build-provenance` (`id-token: write` +
   `attestations: write`, scoped to the build job only). See `ci-github-actions.md`.
+- **Supply-chain admission (constitution §4.6), npm/pnpm instantiation:**
+  - Release-age quarantine on the INSTALL path: npm ≥11.10 supports
+    `min-release-age` (days) + `min-release-age-exclude` in `.npmrc`; pnpm ≥11 has
+    `minimumReleaseAge` (minutes; default 1440) + `minimumReleaseAgeExclude` in
+    `pnpm-workspace.yaml`. Pair with the Dependabot/Renovate `cooldown` on the
+    UPDATE path — each covers a bypass the other leaves open. Note npm silently
+    ignores unknown config keys on older versions: record the required npm version.
+  - Lifecycle scripts: pnpm denies dependency build scripts by default
+    (`strictDepBuilds`, per-package `allowBuilds` allowlist — use it). npm offers
+    only the all-or-nothing `ignore-scripts`, which also disables the project's OWN
+    `prepare`/`prepack` hooks (e.g. `lefthook install`) — where that breaks the
+    workflow, record the limitation per §4.6.2 instead of silently accepting
+    default-allow.
+  - Committed `package-lock.json` + `npm ci` (frozen, no fallback) — see
+    wiring-principles §8.
+- **Biome floor**: type-aware lint rules need Biome 2.5+ — that is a feature
+  COMPATIBILITY FLOOR for research, not pin guidance; the harness still pins one
+  exact researched version.

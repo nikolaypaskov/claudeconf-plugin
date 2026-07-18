@@ -1,6 +1,6 @@
 {
   "name": "claudeconf",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Research-driven, technology-agnostic skill that generates a pinned, standard-tool quality + security harness (git hooks, CI, e2e, gates) tailored to any project.",
   "author": {
     "name": "Nikolay Paskov",
