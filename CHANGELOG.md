@@ -6,6 +6,18 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- README rewritten for profile 3: the doctor, the suppression-approval flow, the
+  post-generation enforcement checklist, the `agentUse` opt-out, and updated
+  limitations (configured vs enforced; permissions are not isolation).
+- `examples/self-harness/` refreshed to the dev repo's actual profile-3 harness
+  (ledger, control-plane CODEOWNERS, `.npmrc` quarantine, digest pins, vendored
+  rules, agent-hardening settings, harness scripts); the stale seed
+  `semgrep.yml` example removed.
+- Plugin/marketplace descriptions mention the harness-doctor agent and the
+  supply-chain + agent-hardening layers.
+
 ## [0.3.0] - 2026-07-18
 
 Agent-hardening release (constitution profile 3), designed and adversarially

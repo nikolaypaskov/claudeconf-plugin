@@ -1,2 +1,24 @@
 # Default owner for everything in this repo.
 * @nikolaypaskov
+
+# >>> claudeconf managed >>>
+# Control-plane ownership (constitution §4.7.1): every artifact that can weaken
+# the harness requires review by a human owner independent of the change author.
+# CONFIGURED only — enforcement needs branch rules requiring code-owner review,
+# dismissing stale approvals, requiring latest-push approval, and no bypass.
+/.github/workflows/ @nikolaypaskov
+/.github/CODEOWNERS @nikolaypaskov
+/.github/dependabot.yml @nikolaypaskov
+/lefthook.yml @nikolaypaskov
+/package.json @nikolaypaskov
+/package-lock.json @nikolaypaskov
+/.npmrc @nikolaypaskov
+/.claudeconf/ @nikolaypaskov
+/.claude/ @nikolaypaskov
+/scripts/ @nikolaypaskov
+/biome.json @nikolaypaskov
+/tsconfig.json @nikolaypaskov
+/vitest.config.ts @nikolaypaskov
+/tsup.config.ts @nikolaypaskov
+/commitlint.config.js @nikolaypaskov
+# <<< claudeconf managed <<<

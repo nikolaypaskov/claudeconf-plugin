@@ -1,0 +1,30 @@
+# Pinned, offline SAST rules for this repo (semgrep 1.168.0).
+# Hand-maintained local copy — NOT fetched from the registry at scan time, so the
+# scan stays deterministic and network-free (constitution §4.3 / §4.1).
+#
+# To grow this set: copy curated rules from semgrep/semgrep-rules at a pinned commit
+# into this directory. Keep every rule local and version-controlled.
+rules:
+  - id: node-no-eval
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      Avoid eval(): it executes arbitrary strings as code and is a common
+      injection sink. Use a safe parser or explicit dispatch instead.
+    metadata:
+      category: security
+      cwe: "CWE-95: Improper Neutralization of Directives in Dynamically Evaluated Code"
+    patterns:
+      - pattern: eval(...)
+
+  - id: node-insecure-randomness-for-tokens
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: >-
+      Math.random() is not cryptographically secure. For tokens, IDs, or secrets
+      use crypto.randomUUID() or crypto.randomBytes() instead.
+    metadata:
+      category: security
+      cwe: "CWE-338: Use of Cryptographically Weak Pseudo-Random Number Generator (PRNG)"
+    patterns:
+      - pattern: Math.random()

@@ -31,6 +31,16 @@ for (const dir of readdirSync("examples", { withFileTypes: true })) {
     }
   }
 
+  if (manifest.constitutionVersion === "3") {
+    if (typeof manifest.agentUse !== "boolean") {
+      throw new Error(`${path}: profile 3 requires a boolean agentUse`);
+    }
+    const hr = manifest.hookRunner;
+    if (typeof hr !== "object" || !hr?.name || !hr?.version) {
+      throw new Error(`${path}: profile 3 requires hookRunner {name, version}`);
+    }
+  }
+
   console.log(`ok: ${path} — 9 milestones, all pinned`);
   checked++;
 }

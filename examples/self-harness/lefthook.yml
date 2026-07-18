@@ -4,45 +4,73 @@
 # Install hooks: `npx lefthook install` (wired into the package.json `prepare` script).
 pre-commit:
   parallel: true
-  commands:
-    lint:
+  jobs:
+    - name: lint
       glob: "*.{ts,tsx,js,jsx,mjs,cjs}"
-      run: npx biome lint {staged_files}
-    typecheck:
+      # --no-errors-on-unmatched: staged files that biome.json ignores (e.g. the
+      # eval fixtures) must not fail the hook (wiring-principles §4).
+      run: npx biome lint --no-errors-on-unmatched {staged_files}
+    - name: typecheck
       run: npx tsc --noEmit
-    secret-scan:
+    - name: secret-scan
       exclude: ["package-lock.json", "*.lock"]
       run: trufflehog filesystem {staged_files} --no-update --no-verification --fail
-    unit:
+    - name: unit
       glob: "*.{ts,tsx}"
       run: npx vitest related --run {staged_files}
+
 commit-msg:
-  commands:
-    commitlint:
+  jobs:
+    - name: commitlint
       run: npx commitlint --edit {1}
+
 pre-push:
   parallel: true
-  commands:
-    unit-full:
+  jobs:
+    - name: unit-full
       run: npx vitest run
-    sast:
-      run: semgrep scan --error --quiet --config .claudeconf/semgrep.yml   # needs semgrep on PATH; CI runs it via the pinned Docker image
-    dependency-audit:
+    - name: sast
+      run: semgrep scan --error --quiet --config .claudeconf/rules/   # needs semgrep on PATH; CI runs it via the pinned Docker image
+    - name: dependency-audit
       run: npm audit --audit-level=high || true   # advisory, never blocks
-    build:
+    - name: build
       run: npx tsup
+
 # Run manually (or in CI) as the full pre-merge gate: `npx lefthook run gate`
+# Gate ≡ CI (constitution §1): the full battery at full scope.
 gate:
   parallel: false
-  commands:
-    unit-coverage:
+  jobs:
+    - name: tool-versions
+      # Version enforcement for bare-name global tools (contract §3.4).
+      run: scripts/assert-tool-versions.sh
+    - name: workflow-audit
+      # The CI workflow is itself a supply-chain artifact (manifest ci.auditors).
+      # zizmor is a preinstalled pinned global (`uv tool install zizmor==1.27.0`)
+      # — hooks never fetch tooling at runtime (constitution §4.2); the
+      # tool-versions job asserts it.
+      run: actionlint -color && zizmor --min-severity medium .github/workflows/
+    - name: suppressions
+      # Unapproved suppressions/exclusion-widenings fail (constitution §4.7.2).
+      run: node scripts/check-suppressions.mjs
+    - name: format-check
+      run: npx biome format . || true   # advisory (constitution §2)
+    - name: lint
+      run: npx biome lint .
+    - name: typecheck
+      run: npx tsc --noEmit
+    - name: unit-coverage
       run: npx vitest run --coverage
-    e2e:
+    - name: e2e
       run: npx vitest run test/integration/
-    sast:
-      run: semgrep scan --error --quiet --config .claudeconf/semgrep.yml
-    dependency-audit:
+    - name: fixtures
+      run: node scripts/validate-fixtures.mjs
+    - name: sast
+      run: semgrep scan --error --quiet --config .claudeconf/rules/
+    - name: secret-scan
+      run: trufflehog filesystem . --no-update --no-verification --fail --exclude-paths .claudeconf/trufflehog-exclude.txt
+    - name: dependency-audit
       run: npm audit --audit-level=high || true   # advisory
-    build:
+    - name: build
       run: npx tsup
 # <<< claudeconf managed <<<

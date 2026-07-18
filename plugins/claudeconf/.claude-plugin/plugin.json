@@ -1,7 +1,7 @@
 {
   "name": "claudeconf",
   "version": "0.3.0",
-  "description": "Research-driven, technology-agnostic skill that generates a pinned, standard-tool quality + security harness (git hooks, CI, e2e, gates) tailored to any project.",
+  "description": "Research-driven, technology-agnostic harness generator for Claude Code: pinned, standard-tool quality + security pipelines (git hooks, CI, e2e, gates, supply-chain admission, agent-hardening) plus a read-only harness-doctor agent.",
   "author": {
     "name": "Nikolay Paskov",
     "email": "n.g.paskov@gmail.com"

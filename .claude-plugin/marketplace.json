@@ -9,7 +9,7 @@
     {
       "name": "claudeconf",
       "source": "./plugins/claudeconf",
-      "description": "Generate a pinned, technology-agnostic quality + security harness (git hooks, CI, e2e, gates) for any project.",
+      "description": "Research-driven, technology-agnostic harness generator for Claude Code: pinned, standard-tool quality + security pipelines (git hooks, CI, e2e, gates, supply-chain admission, agent-hardening) plus a read-only harness-doctor agent.",
       "version": "0.3.0"
     }
   ]

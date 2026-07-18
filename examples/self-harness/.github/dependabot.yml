@@ -7,6 +7,12 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    # Release-age quarantine on the UPDATE path (constitution §4.6); pairs with
+    # .npmrc min-release-age on the install path. Version updates only — security
+    # updates bypass cooldown by design.
+    cooldown:
+      default-days: 2
+      semver-major-days: 7
     groups:
       dev-dependencies:
         dependency-type: "development"
@@ -14,4 +20,7 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 2
+      semver-major-days: 7
 # <<< claudeconf managed <<<
