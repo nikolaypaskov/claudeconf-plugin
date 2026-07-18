@@ -17,9 +17,23 @@ Point it at a repository and it will:
 
 On an existing project it only fills gaps, using managed blocks so it does not overwrite your configuration. The generated harness is deterministic: pinned versions, no network calls in the unit tier, and repeatable re-runs.
 
+## What ships in the plugin
+
+- **`/claudeconf`** — the harness-generator skill.
+- **`claudeconf:harness-doctor`** — an advisory, read-only subagent that checks an
+  existing harness against its RECORDED constitution profile: manifest/wiring/
+  drift checks with cited evidence (PASS/FAIL/UNKNOWN), profile-upgrade
+  availability, and — only when you ask for `--online` — registry-existence
+  probes and read-only GitHub branch-protection checks via `gh api` (that mode
+  performs network access and needs `gh` auth; it is disclosed and opt-in). The
+  doctor never edits, regenerates, or applies anything.
+
 ## Requirements
 
 - To **run the skill**: [Claude Code](https://claude.com/claude-code) and git.
+  Verified against Claude Code 2.1.214; the plugin needs `skills/` + `agents/`
+  plugin discovery, and generated harnesses use `SessionStart` hooks and
+  `permissions.deny` rules (current Claude Code releases support all of these).
 - For the **generated harness** to run: standard tooling you already have or can install — a hook runner (lefthook by default), your stack's own tools (formatter, test runner, etc.), and Docker for the CI security tier (semgrep and trufflehog run as pinned images; GitHub Actions provides Docker). The skill researches and pins exact versions.
 
 ## Install

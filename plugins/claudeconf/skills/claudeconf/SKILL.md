@@ -29,8 +29,13 @@ reference wins.
 - `references/wiring-principles.md` — the technology-AGNOSTIC correctness principles for
   wiring any harness so it actually runs unattended (project-local tool resolution in
   hooks, coverage providers, CI runner/setup matching the stack, formatter/scanner
-  scoping, verify-by-executing). These bind regardless of which tools you research —
-  instantiate them per project.
+  scoping, verify-by-executing, execute-the-bits-you-pinned). These bind regardless of
+  which tools you research — instantiate them per project.
+- `references/agent-hardening.md` — the constitution §4.7 instantiation guide:
+  control-plane ownership derivation, the suppression approval ledger, the
+  editor-side deny module + SessionStart hook, and the honest limits
+  (configured ≠ enforced; permissions ≠ isolation). Binds whenever `agentUse` is
+  true — which is the default.
 
 The patterns under `references/patterns/` (one per stack — node, python, elixir, swift,
 kotlin — plus `security.md`, `ci-github-actions.md`, `e2e.md`) are REFERENCE ANCHORS,
@@ -136,6 +141,11 @@ resolution, coverage providers, CI runner/setup, formatter/scanner scoping):
   dir for a CLI/service). Record the framework + suite path.
 - **Pinned tool configs** — one config file per tool a milestone uses (e.g. formatter,
   test runner, e2e, the pinned offline SAST ruleset), each pinning its tool version.
+- **Agent-hardening artifacts** (`agentUse: true`, the default) — control-plane
+  CODEOWNERS entries derived from the artifacts you just generated, the
+  `.claudeconf/suppressions.json` ledger + its check script wired into gate + CI,
+  and the `.claude/settings.json` deny module + SessionStart advisory hook
+  (see `references/agent-hardening.md`). Print configured-vs-enforced honestly.
 - **Manifest** — write the contract from Step 5 to `.claudeconf/manifest.json`.
 
 Idempotency is mandatory (constitution §4.4): when inserting into files that may already

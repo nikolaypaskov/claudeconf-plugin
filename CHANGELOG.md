@@ -6,6 +6,45 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-18
+
+Agent-hardening release (constitution profile 3), designed and adversarially
+reviewed with a second-model judge. Generated harnesses are **agent-hardened,
+never "agent-proof"** — `configured` and `enforced` are reported separately.
+
+### Added
+
+- **Constitution §4.7 — merge trust root**: independent human control over the
+  DERIVED control plane (workflows, hook-runner config, tool configs, manifests,
+  lockfiles, scanner excludes, provisioners, the suppression ledger, CODEOWNERS
+  itself); suppression additions, broadenings, and config-level weakenings
+  require recorded human approval via the **suppression approval ledger**
+  (`.claudeconf/suppressions.json` + an occurrence-bound diff checker wired into
+  gate and CI — approval is a reviewed ledger edit, never a re-run); `agentUse`
+  manifest semantics with a protected opt-out.
+- **`references/agent-hardening.md`** — threat model, ledger protocol, the
+  editor-side deny module with its residual gaps named (permissions are
+  defense-in-depth, not isolation), the bounded SessionStart advisory template,
+  and why a blocking Stop hook is rejected as a default.
+- **`claudeconf:harness-doctor` agent** + `references/doctor-checklist.md` — an
+  evidence-driven, advisory, read-only check procedure validating a harness
+  against its recorded profile; `--online` (opt-in, disclosed) adds registry and
+  branch-protection probes.
+- **Executed-fixture proof**: the dev repo's CI now runs the flagship fixture
+  end to end (provisioned pinned tools, fresh temp repo, forced pre-commit, full
+  gate, executed-jobs assertion) on every PR.
+- **Provisioning module** (`provision-tools.sh` pattern): Linux/x86_64 CI
+  provisioning with sha256-verified single binaries; other platforms are
+  explicitly "not applicable" (no silent PATH fallback).
+
+### Changed
+
+- **Plugin layout**: the skill moved to `skills/claudeconf/` inside the plugin
+  (conventional multi-component layout) alongside the new `agents/` directory.
+- Manifest schema (profile 3): `hookRunner` is now `{name, version}`; `agentUse`
+  is required; profile checks are keyed by the RECORDED `constitutionVersion`
+  ("upgrade available", never "invalid", for older harnesses).
+
 ## [0.2.0] - 2026-07-18
 
 Policy & provenance release (constitution profile 2), scoped and adversarially
@@ -117,7 +156,8 @@ Claude Code plugin.
   badge, SECURITY and CONTRIBUTING docs, and issue/PR templates.
 - Self-hosted marketplace manifest, MIT license, and README.
 
-[Unreleased]: https://github.com/nikolaypaskov/claudeconf-plugin/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/nikolaypaskov/claudeconf-plugin/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/nikolaypaskov/claudeconf-plugin/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/nikolaypaskov/claudeconf-plugin/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/nikolaypaskov/claudeconf-plugin/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/nikolaypaskov/claudeconf-plugin/releases/tag/v0.1.0

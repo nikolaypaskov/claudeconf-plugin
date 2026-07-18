@@ -16,6 +16,11 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
         with:
           node-version: '24'
+      - name: strict plugin + marketplace validation
+        # Version-pinned CLI install at CI setup time (schema validation only, no auth).
+        run: |
+          npm install -g @anthropic-ai/claude-code@2.1.214
+          claude plugin validate --strict .
       - name: validate example manifests (9 pinned milestones)
         run: node scripts/validate-examples.mjs
       - name: validate example YAML parses

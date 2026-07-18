@@ -23,6 +23,9 @@ a contract violation; the skill must abort with an error listing the missing art
 | **E2E scaffold + config** | e2e suite directory + framework config file (suite path fits the project's interface — `e2e/` for a UI, the integration-test dir for a CLI/service) | Must run unattended with no live external credentials. Framework + suite recorded in manifest. |
 | **Pinned tool configs** | One config file per tool used by a milestone | e.g. `biome.json`, `vitest.config.ts`, `playwright.config.ts`, and the vendored SAST ruleset directory `.claudeconf/rules/` (pinned rule files committed into the repo — see `patterns/security.md`). Each config pins the tool version via the project lock file or an explicit version field. |
 | **Repo hygiene** | `.editorconfig`, `.gitattributes` (`* text=auto eol=lf`), `.github/CODEOWNERS` | Baseline staples: consistent editor settings, normalized line endings (protects the determinism invariant), and code ownership. After generation, print a checklist to enable branch protection / required status checks (rulesets preferred). A generated ruleset JSON is OPTIONAL desired-state input that a human must review and import — its existence never implies protection is applied; the harness cannot change GitHub settings. |
+| **Suppression approval ledger** | `.claudeconf/suppressions.json` + a check script (e.g. `scripts/check-suppressions.mjs`) wired into gate + CI | The human-approval path for silencing a control (constitution §4.7.2). The ledger records `{fingerprint, file, rule, rationale}` per approved suppression. The check diffs against the merge base and FAILS on any added or BROADENED suppression token, or any widened config-level exclusion (scanner exclude files, ignore configs), that lacks a ledger entry. Approval = a reviewed merge of the ledger change itself — the ledger sits on the protected surface, so a code-owner review of it IS the sign-off. |
+| **Control-plane ownership** | Entries in `.github/CODEOWNERS` (GitHub implementation of §4.7.1) | Ownership entries for the DERIVED protected surface: CI workflows, hook-runner config, tool configs, manifests + lockfiles, scanner exclude/ignore files, provisioning scripts + checksums, the suppression ledger, and CODEOWNERS itself. CONFIGURED only — the post-generation checklist names the `enforced` bar: branch rules requiring code-owner approval, dismissing stale reviews, requiring approval of the latest push, and no bypass actors. Never claim `enforced` from the file's existence. |
+| **Agent-hardening module** (`agentUse: true`) | `permissions.deny` entries + a `SessionStart` advisory hook in `.claude/settings.json` | Default-on runtime hardening: deny rules hide secret-bearing paths from the agent (defense-in-depth, NOT isolation — see `agent-hardening.md` for residual gaps), and the SessionStart hook injects a bounded, schema-validated one-liner: declared profile + the runner-specific gate command ("declared", never "verified"). No Stop hook by default (see agent-hardening.md — experimental opt-in only). |
 | **Manifest** | `.claudeconf/manifest.json` | See §2 for the complete schema. |
 
 ### 1.1 Scope guard (pentest context only)
@@ -57,10 +60,11 @@ deliberate change; do not present generation itself as byte-stable.
 
 ```json
 {
-  "constitutionVersion": "2",
+  "constitutionVersion": "3",
   "generator": "claudeconf-skill",
+  "agentUse": true,
   "stacks": ["node"],
-  "hookRunner": "lefthook",
+  "hookRunner": { "name": "lefthook", "version": "x.y.z" },
   "milestones": {
     "format":          { "tool": "biome",     "version": "2.5.0", "tiers": ["edit","gate","ci"] },
     "lint":            { "tool": "biome",     "version": "2.5.0", "tiers": ["pre-commit","gate","ci"] },
@@ -113,10 +117,11 @@ one per stack.
 
 | Field | Rule |
 | --- | --- |
-| `constitutionVersion` | MUST match the machine-readable `constitution-version` marker at the top of `constitution.md`. Currently `"2"` (see constitution §6 for bump/migration semantics). |
+| `constitutionVersion` | MUST match the machine-readable `constitution-version` marker at the top of `constitution.md`. Currently `"3"` (see constitution §6 for bump/migration semantics; validators keep older profiles' checks and validate a harness against its RECORDED profile). |
+| `agentUse` | Boolean, default `true` (constitution §4.7). `false` requires an `agentUseRationale` string, may be chosen only at the generation human-review gate, and disables every agent-hardened claim. Changing the value later is a control-plane change (§4.7.3). |
 | `generator` | Fixed string `"claudeconf-skill"`. |
 | `stacks` | One or more stack identifiers detected by the skill. Non-empty array. |
-| `hookRunner` | `"lefthook"` (default) or the ecosystem-standard runner name. |
+| `hookRunner` | Object `{ "name", "version" }` — the runner (default `"lefthook"`, or the ecosystem-standard runner per constitution §5) and its exact pinned version. A doctor cannot verify what it cannot identify; a bare name is a profile-2 form. |
 | `milestones` | MUST contain exactly the nine milestone keys listed in §2.2. No milestone may be absent. |
 | `milestones[*].tool` | Exact tool name used. A single-tool entry has `tool` + `version`; a multi-stack entry has `tools[]` instead (§2.2.1) — never both, never a joined string. |
 | `milestones[*].version` | Exact pinned version string (or `"n/a"` for tools that version through the runtime, e.g. `npm-audit`). Floating ranges are forbidden, and so are composite strings — a version must not contain spaces or `+`. Applies to every `tools[]` element too. |
@@ -172,6 +177,16 @@ considered complete until all checks pass.
   `.github/CODEOWNERS`.
 - [ ] The whole-tree scanner exclude file exists (e.g.
   `.claudeconf/trufflehog-exclude.txt`) and covers VCS metadata + vendored trees.
+- [ ] `.claudeconf/suppressions.json` exists (empty array is valid) and its check
+  script is wired into the gate AND CI (§4.7.2).
+- [ ] CODEOWNERS carries ownership entries for the full derived control plane —
+  including the suppression ledger and CODEOWNERS itself (§4.7.1).
+- [ ] With `agentUse: true`: `.claude/settings.json` contains the
+  `permissions.deny` module and the SessionStart advisory hook; the manifest has
+  no Stop hook wired by default.
+- [ ] The post-generation output states `configured` vs `enforced` separately and
+  prints the enforcement checklist (code-owner approval, dismiss stale, latest
+  push, no bypass) without claiming any of it is active.
 
 ### 3.3 Milestone wiring
 
@@ -254,5 +269,6 @@ This contract operationalises the constitution:
 | §4.4 Idempotent | §3.5 no-op re-generation check |
 | §4.5 Scope guard | §1.1 scope guard artifact; §3.2 scope guard existence check |
 | §4.6 Supply-chain admission | §1 dependency-update + lockfile rows; §3.2 cooldown/lockfile checks |
+| §4.7 Merge trust root | §1 suppression-ledger + control-plane + agent-hardening rows; §2.3 `agentUse`; §3.2 ledger/ownership checks |
 | §5 Hook-Runner Rule | §2.3 `hookRunner` field; §1 git-hook config note |
 | §6 Versioning & Migration | §2.3 `constitutionVersion` field rule |
