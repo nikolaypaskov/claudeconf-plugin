@@ -17,6 +17,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `semgrep.yml` example removed.
 - Plugin/marketplace descriptions mention the harness-doctor agent and the
   supply-chain + agent-hardening layers.
+- harness-doctor: explicit note that the agent must run on a high-capability
+  model (evidence-sufficiency judgments have no downstream verifier; the
+  profile-4 bundled deterministic checker is the planned mitigation).
 
 ## [0.3.0] - 2026-07-18
 
