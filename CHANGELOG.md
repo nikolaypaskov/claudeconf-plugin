@@ -6,6 +6,16 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-07-19
+
+Documentation + capability-routing release. The shipped skill now contains the
+"Capability routing" section (route by SEMANTIC verifiability — decision-creating
+steps stay on the most capable model at maximum reasoning; only
+deterministic-verifier-arbitrated fan-out is delegable) and the
+doctor-checklist ground rule that the doctor must run on a high-capability model
+(false-PASS risk on cheaper models; the profile-4 bundled deterministic checker
+is the planned mitigation).
+
 ### Changed
 
 - README rewritten for profile 3: the doctor, the suppression-approval flow, the
@@ -171,7 +181,8 @@ Claude Code plugin.
   badge, SECURITY and CONTRIBUTING docs, and issue/PR templates.
 - Self-hosted marketplace manifest, MIT license, and README.
 
-[Unreleased]: https://github.com/nikolaypaskov/claudeconf-plugin/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/nikolaypaskov/claudeconf-plugin/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/nikolaypaskov/claudeconf-plugin/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/nikolaypaskov/claudeconf-plugin/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/nikolaypaskov/claudeconf-plugin/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/nikolaypaskov/claudeconf-plugin/compare/v0.1.0...v0.1.1

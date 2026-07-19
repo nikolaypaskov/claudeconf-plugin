@@ -10,7 +10,7 @@
       "name": "claudeconf",
       "source": "./plugins/claudeconf",
       "description": "Research-driven, technology-agnostic harness generator for Claude Code: pinned, standard-tool quality + security pipelines (git hooks, CI, e2e, gates, supply-chain admission, agent-hardening) plus a read-only harness-doctor agent.",
-      "version": "0.3.0"
+      "version": "0.3.1"
     }
   ]
 }

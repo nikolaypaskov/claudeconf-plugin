@@ -12,6 +12,27 @@ this procedure never hardcodes per-language choices.
 Follow these steps IN ORDER. Do not skip the human-review gate. Do not commit before
 approval.
 
+## Capability routing (who executes what)
+
+Route by VERIFIABILITY — and "verifiable" means semantically checked by a
+deterministic verifier downstream, not merely schema-valid or exiting 0:
+
+- **Most capable model, maximum reasoning** — every step that CREATES decisions
+  the verifiers then enforce: detection (Step 2 — errors mis-scope everything),
+  brainstorm (Step 3), research and tool selection (Step 4), the contract
+  (Step 5), the INTEGRATION of Step 6 (scope/exclusion/scanner-rule/e2e-fidelity
+  choices are semantic; a subtly wrong but schema-valid wiring passes checks),
+  and the human-review-gate presentation (Step 8). Adversarial review of the
+  result, any time, is top-tier work.
+- **Delegable to cheaper/faster models or subagents** — pure FAN-OUT whose
+  outputs deterministic checks fully arbitrate: applying an already-decided
+  wiring pattern across files/fixtures, running the Step 7 self-verify commands
+  and registry confirmations (scripts and pinned tools decide; the model only
+  reads their output), and mechanical rewrites (version bumps, lockfile
+  regeneration) that the executable gate re-proves.
+- Verification itself is never model work. If a cheaper model's error would
+  survive the §3 checklist plus the executable gate, that task was not delegable.
+
 ## Step 1 — Load the invariants
 
 Read both reference documents in full before touching the project. They are the source

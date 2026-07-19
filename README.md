@@ -28,7 +28,9 @@ On an existing project it only fills gaps, using managed blocks so it does not o
   availability, and — only when you ask for `--online` — registry-existence
   probes and read-only GitHub branch-protection checks via `gh api` (that mode
   performs network access and needs `gh` auth; it is disclosed and opt-in). The
-  doctor never edits, regenerates, or applies anything.
+  doctor never edits, regenerates, or applies anything. Run it on a
+  high-capability model: PASS/FAIL judgments hinge on evidence sufficiency,
+  which nothing downstream re-checks.
 
 ## Requirements
 

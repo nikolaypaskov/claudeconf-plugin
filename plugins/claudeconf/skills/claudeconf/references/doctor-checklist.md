@@ -5,6 +5,12 @@ holding a claudeconf harness. It is ADVISORY and read-only: report, never fix.
 
 ## Ground rules
 
+- **Run on a high-capability model.** PASS/FAIL judgments hinge on whether cited
+  evidence is SUFFICIENT, and no downstream verifier re-checks that judgment —
+  UNKNOWN-on-ambiguity is a prompt policy, not a mechanical safeguard, so a
+  cheaper model can false-PASS. (A plugin-bundled deterministic checker is the
+  planned profile-4 mitigation; until then, do not route the doctor down.)
+
 - **Validate against the RECORDED profile.** Read `constitutionVersion` from
   `.claudeconf/manifest.json` and apply that profile's checks (profile 2 lacks
   §4.7 artifacts — their absence is not a failure there; report "profile 3
