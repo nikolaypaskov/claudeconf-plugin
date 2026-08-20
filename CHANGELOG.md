@@ -6,6 +6,49 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-20
+
+Constitution **profile 5**: the harness now tells the agents working in a project when
+delegating is safe.
+
+### Added
+
+- **Delegability record** (`.claudeconf/delegation.md`, constitution §4.7 rule 4). A
+  generated, regeneration-owned file stating the two-sided rule — work may go to a less
+  capable agent or model only when one of the project's OWN deterministic verifiers decides
+  the result, and work whose mistakes could survive every one of them may not — followed by
+  that project's actual arbiters, the non-delegable floor, and a plain statement of what the
+  record does not establish. Wording is agent-agnostic: it names no vendor's orchestration
+  primitives, because a stale instruction read by an agent is worse than no instruction.
+- **Two new checks.** `A16` verifies the four required sections exist and carry content;
+  `D9` compares the recorded arbiters against the ones the harness actually has, in both
+  directions, so a renamed project check or a relocated gate cannot leave the record
+  pointing at a verifier that no longer runs.
+- **SessionStart advisory reconciliation** (in `A10`, at profile 5): the advisory is a
+  second record of the recorded profile, so both interpolated values are now checked against
+  the manifest. An unchecked advisory keeps announcing the profile the harness used to be
+  at, directly into an agent's context.
+- The `harness-doctor` agent reports the record as **declared, never enforced**.
+
+### Changed
+
+- **Profile 4 → 5.** A profile bump rather than an amendment to 4, because §6 bumps on
+  required artifacts and archives profiles so an older harness is never judged by rules it
+  never claimed. **A profile-4 harness acquires no new failures** — the three new checks are
+  level-5, and the upgrade reports as INFO. New failures on a profile-4 harness after taking
+  this release would be a checker bug, not a migration you owe.
+- `references/migrations.md` gains the `4 → 5` delta; `modes.md` records that a refresh
+  touches the record only when the pinned runner path moves.
+
+### Known limits
+
+- The record is a **declared** rule, not a control. The checker verifies the arbiters are
+  named correctly; nothing establishes they are sufficient, and no artifact can establish
+  that an agent read the file or obeyed it.
+- `upgrade` mode still has not been exercised end to end by the skill itself. The 4 → 5
+  procedure is written, and the source repository plus all four shipped exemplars were
+  migrated by following it — but by hand.
+
 ## [0.4.0] - 2026-08-20
 
 Profile 4: an **ownership split** (what a regeneration owns vs what the project owns) and

@@ -26,7 +26,8 @@ a contract violation; the skill must abort with an error listing the missing art
 | **Repo hygiene** | `.editorconfig`, `.gitattributes` (`* text=auto eol=lf`), `.github/CODEOWNERS` | Baseline staples: consistent editor settings, normalized line endings (protects the determinism invariant), and code ownership. After generation, print a checklist to enable branch protection / required status checks (rulesets preferred). A generated ruleset JSON is OPTIONAL desired-state input that a human must review and import — its existence never implies protection is applied; the harness cannot change GitHub settings. |
 | **Suppression approval ledger** | `.claudeconf/suppressions.json` + a check script (e.g. `scripts/check-suppressions.mjs`) wired into gate + CI | The human-approval path for silencing a control (constitution §4.7.2). The ledger records `{fingerprint, file, rule, rationale}` per approved suppression. The check diffs against the merge base and FAILS on any added or BROADENED suppression token, or any widened config-level exclusion (scanner exclude files, ignore configs), that lacks a ledger entry. Approval = a reviewed merge of the ledger change itself — the ledger sits on the protected surface, so a code-owner review of it IS the sign-off. It ALSO fails when a control disappears from a harness file (`control-removal`), where "disappears" means its IDENTITY is gone — the job or step name — not that a line's text changed. A command that is rewritten while its identity survives is a MODIFICATION, judged by the weakening rules; calling it a removal buries one real finding under dozens of "the file moved" entries, and noise is how a real entry gets waved through. Base selection is fixed where it matters: an explicit base override is REFUSED under CI with no allowlist and no escape flag, because an env-gated exemption is self-authorizing — any workflow edit can set it — and a shallow clone in authoritative CI is an ERROR, never an empty diff, since a clone that cannot see history otherwise passes by being unable to look. Finally, this check is a NOTIFIER whose pattern set is incomplete by construction, so its output must never read as a guarantee: a clean result states what it compared, never that no weakening occurred. |
 | **Control-plane ownership** | Entries in `.github/CODEOWNERS` (GitHub implementation of §4.7.1) | Ownership entries for the DERIVED protected surface: CI workflows, hook-runner config, tool configs, manifests + lockfiles, scanner exclude/ignore files, provisioning scripts + checksums, the suppression ledger, and CODEOWNERS itself. CONFIGURED only — the post-generation checklist names the `enforced` bar: branch rules requiring code-owner approval, dismissing stale reviews, requiring approval of the latest push, and no bypass actors. Never claim `enforced` from the file's existence. |
-| **Agent-hardening module** (`agentUse: true`) | `permissions.deny` entries + a `SessionStart` advisory hook in `.claude/settings.json` | Default-on runtime hardening: deny rules hide secret-bearing paths from the agent (defense-in-depth, NOT isolation — see `agent-hardening.md` for residual gaps), and the SessionStart hook injects a bounded, schema-validated one-liner: declared profile + the runner-specific gate command ("declared", never "verified"). No Stop hook by default (see agent-hardening.md — experimental opt-in only). Both are managed at ENTRY level like the edit-tier hook: the SessionStart entry is listed in `agentHardening.managedHooks[]`, and the deny set is recorded verbatim as `agentHardening.denyPatterns`. A re-run reconciles against the RECORDED set — it removes those patterns, adds the current ones, and leaves project-owned deny entries alone. Patterns are `**/`-anchored so nested paths (`apps/api/.env`) are covered, and the module's note states plainly that deny rules govern Read/Edit only — **Bash is not covered** — and that `runtimeIsolation` is not configured. |
+| **Agent-hardening module** (`agentUse: true`) | `permissions.deny` entries + a `SessionStart` advisory hook in `.claude/settings.json` | Default-on runtime hardening: deny rules hide secret-bearing paths from the agent (defense-in-depth, NOT isolation — see `agent-hardening.md` for residual gaps), and the SessionStart hook injects a bounded, schema-validated advisory: declared profile + the runner-specific gate command ("declared", never "verified") and — at profile ≥5 — a second sentence naming `.claudeconf/delegation.md`, because a rule that lives only in a file nothing points at governs nothing. The advisory is a FIXED TEMPLATE of exactly two sentences at profile ≥5, not a place for free prose; the delegability rule itself lives in the artifact, never here. No Stop hook by default (see agent-hardening.md — experimental opt-in only). Both are managed at ENTRY level like the edit-tier hook: the SessionStart entry is listed in `agentHardening.managedHooks[]`, and the deny set is recorded verbatim as `agentHardening.denyPatterns`. A re-run reconciles against the RECORDED set — it removes those patterns, adds the current ones, and leaves project-owned deny entries alone. Patterns are `**/`-anchored so nested paths (`apps/api/.env`) are covered, and the module's note states plainly that deny rules govern Read/Edit only — **Bash is not covered** — and that `runtimeIsolation` is not configured. |
+| **Delegability record** (`agentUse: true`, profile ≥5) | `.claudeconf/delegation.md` | The generated statement of constitution §4.7 rule 4 for THIS project: work may be delegated to a less capable agent or model only when one of the arbiters the file lists decides the result, and work whose mistakes could survive all of them may not be. Fully managed — rewritten wholesale on re-run, no sentinels — and DETERMINISTIC: the content is a function of the manifest, so a no-op regeneration is byte-identical (§3.5). Four required `##` sections, specified in §1.2: `## Rule`, `## Arbiters`, `## Never delegable`, and `## What this record is not`. The arbiter list is the machine-readable part and is matched BY VALUE rather than by prose — the backticked strings must be exactly the arbiters the manifest implies, no more and no less (§3.2) — so the record cannot rot into citing a gate that no longer exists. Wording is AGENT-AGNOSTIC: it names no vendor's orchestration primitives, because the rule outlives any particular agent runtime, and a harness that hardcodes today's primitives ages into instructions that mislead. The file is guidance an agent READS; nothing in the harness executes it, which keeps constitution §4.8 intact — verification is pointed at a harness, never wired into it. |
 | **Manifest** | `.claudeconf/manifest.json` | See §2 for the complete schema. |
 
 ### 1.1 Scope guard (pentest context only)
@@ -35,6 +36,41 @@ When the harness is generated for a security or pentest engagement, the
 `.claude/settings.json` edit hook must include a scope-guard wrapper that reads `.scope`
 from the repository root and refuses to invoke any network-aware tool against a target
 that falls outside the listed entries. See constitution §4.5 for the scope file format.
+
+---
+
+### 1.2 Delegability record format (profile ≥5)
+
+`.claudeconf/delegation.md` carries four required `##` sections, each non-empty. Prose
+inside them is free; the `## Arbiters` block is not — it is parsed.
+
+1. **`## Rule`.** Both directions stated explicitly: delegation is permitted when an
+   arbiter below decides the result, and forbidden when no arbiter would catch the
+   mistake. A record that only licenses, or only forbids, is half the rule.
+2. **`## Arbiters`.** One per line, exactly `` - `<exact string>` — <role> ``. The set of
+   backticked strings is derived from the harness and nothing else:
+   - the pinned gate invocation — the runner path the hook config declares plus the gate
+     subcommand (`node_modules/.bin/lefthook run gate`), falling back to the bare
+     `hookRunner.name` only where `runnerPinned` is false, since there is no path to cite;
+   - every `projectChecks[].name`;
+   - `ci.workflow`.
+   Set equality is checked, so an arbiter that is removed from the manifest and left in
+   the record FAILS, and so does one added to the record that the manifest does not name.
+3. **`## Never delegable`.** The §4.7.1 control-plane surface, the suppression ledger,
+   the manifest, and this file itself — never delegable, whatever any arbiter reports.
+   These are the artifacts that decide what the arbiters check, so an arbiter's verdict
+   on a change to them is circular.
+4. **`## What this record is not`.** The checker verifies that these arbiters are NAMED
+   consistently with the manifest. It does not establish that they are sufficient, and no
+   artifact can establish that an agent obeyed the rule.
+
+What the checker can establish about elements 1, 3, and 4 is that the sections exist and
+are non-empty — it does not read the prose and does not judge whether the rule is stated
+well. That bound is stated here so the check's evidence is not mistaken for more than it
+is; only the arbiter list is verified by value.
+
+The record states the rule; it does not enforce it. Treating it as a control would be
+the same error §4.7 already names about `configured` versus `enforced`.
 
 ---
 
@@ -376,6 +412,19 @@ considered complete until all checks pass.
 - [ ] With `agentUse: true`: `.claude/settings.json` contains the
   `permissions.deny` module and the SessionStart advisory hook; the manifest has
   no Stop hook wired by default.
+
+- [ ] With `agentUse: true` at profile ≥5: `.claudeconf/delegation.md` exists and carries
+  all four §1.2 sections, each non-empty. Section presence is what is verified; the prose
+  inside them is not read, and the check's evidence says so rather than implying the rule
+  was judged. A missing or unreadable file is reported as such, never inferred from the
+  manifest alone.
+- [ ] The `## Arbiters` set equals the set the harness implies — the pinned gate
+  invocation, every `projectChecks[].name`, and `ci.workflow` — compared as exact
+  backticked strings in BOTH directions. A manifest arbiter missing from the record and a
+  record arbiter absent from the manifest are both failures: the first understates what
+  decides, the second points agents at a verifier that may no longer run.
+- [ ] The SessionStart advisory matches the profile-≥5 fixed template — the declared
+  profile and gate command, then the pointer at `.claudeconf/delegation.md`.
 - [ ] Entry-level ownership of `.claude/settings.json` holds in BOTH directions: every
   entry named by `agentHardening.managedHooks[]` exists and carries the `_claudeconf`
   marker, and every entry carrying that marker is named by `managedHooks[]`. The two
@@ -759,6 +808,7 @@ This contract operationalises the constitution:
 | §4.5 Scope guard | §1.1 scope guard artifact; §3.2 scope guard existence check |
 | §4.6 Supply-chain admission | §1 dependency-update + lockfile rows; §3.2 cooldown/lockfile checks |
 | §4.7 Merge trust root | §1 suppression-ledger + control-plane + agent-hardening rows; §2.3 `agentUse`, `agentHardening`; §3.2 ledger/ownership/deny checks |
+| §4.7 rule 4 Delegability | §1 delegability-record row; §1.2 record format; §3.2 record + arbiter-set + advisory-template checks |
 | §4.8 Deterministic verification | §3.6 deterministic checker (enforcing vs advisory, the critical set); §2.3 `constitutionVersion` field rule |
 | §5 Hook-Runner Rule | §2.3 `hookRunner` + `runnerPinned` fields; §1 git-hook config row; §3.2 runner-pinning checks; §3.4 runner version assertion |
 | §6 Versioning & Migration | §2.3 `constitutionVersion` field rule; §3.6 unsupported-profile handling |

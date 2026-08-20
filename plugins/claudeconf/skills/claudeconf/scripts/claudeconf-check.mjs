@@ -45,8 +45,8 @@ import { load as yamlLoad } from './vendor/js-yaml.mjs';
 // Constants
 // ---------------------------------------------------------------------------------------
 
-const KNOWN_PROFILES = ['2', '3', '4'];
-const CURRENT_PROFILE = 4;
+const KNOWN_PROFILES = ['2', '3', '4', '5'];
+const CURRENT_PROFILE = 5;
 
 const MILESTONES = [
   'format',
@@ -159,6 +159,7 @@ export const CHECK_ORDER = [
   'A11',
   'A12',
   'A13',
+  'A16',
   'A14',
   'A15',
   'W1',
@@ -189,6 +190,7 @@ export const CHECK_ORDER = [
   'D6',
   'D7',
   'D8',
+  'D9',
   'P1',
 ];
 
@@ -226,6 +228,7 @@ export const GROUP_IDS = {
     ['A11', 4],
     ['A12', 1],
     ['A13', 4],
+    ['A16', 5],
   ],
   'A14/A15': [
     ['A14', 4],
@@ -262,6 +265,7 @@ export const GROUP_IDS = {
     ['D6', 1],
     ['D7', 1],
     ['D8', 1],
+    ['D9', 5],
   ],
 };
 
@@ -3072,6 +3076,36 @@ function checkArtifacts(ctx, r, level) {
         r.add('A10', 'PASS', '.claude/settings.json: SessionStart advisory hook present', {
           file: '.claude/settings.json',
         });
+        // At profile 5 the advisory is a fixed two-sentence template (contract §1). Both of
+        // its interpolated values are checked against the manifest, because an advisory is a
+        // SECOND record of the profile: left unchecked it goes on announcing the profile the
+        // harness used to be at, and it announces it straight into an agent's context.
+        if (level >= 5) {
+          const text = sessionStart.map((e) => e.command).join('\n');
+          const declared = `profile ${ctx.manifest?.constitutionVersion}`;
+          if (!text.includes(declared)) {
+            r.add(
+              'A10',
+              'FAIL',
+              `.claude/settings.json: the SessionStart advisory does not declare "${declared}" — it announces a profile the manifest does not record`,
+              { file: '.claude/settings.json' },
+            );
+          } else if (!text.includes(DELEGATION_RECORD)) {
+            r.add(
+              'A10',
+              'FAIL',
+              `.claude/settings.json: the SessionStart advisory does not point at ${DELEGATION_RECORD}`,
+              { file: '.claude/settings.json' },
+            );
+          } else {
+            r.add(
+              'A10',
+              'PASS',
+              `.claude/settings.json: the SessionStart advisory declares ${declared} and points at ${DELEGATION_RECORD}`,
+              { file: '.claude/settings.json' },
+            );
+          }
+        }
       }
       if (level >= 4) {
         const recorded = manifest.agentHardening?.denyPatterns ?? [];
@@ -3187,6 +3221,126 @@ function checkArtifacts(ctx, r, level) {
 
   // A13 — the managed hook config pins the runner
   if (level >= 4) checkRunnerPinning(ctx, r);
+
+  // A16 — the delegability record's required sections (profile 5+, agent-driven only)
+  if (level >= 5 && manifest?.agentUse === true) checkDelegationSections(ctx, r);
+}
+
+/**
+ * The delegability record (contract §1.2), new at profile 5.
+ *
+ * Split deliberately across two ids because only half of it is verifiable. A16 establishes
+ * that the four sections exist and carry content; D9 compares the arbiter list against the
+ * harness BY VALUE. Nothing here reads the prose — whether the rule is stated well is model
+ * work, and the evidence strings avoid any word that would imply otherwise.
+ */
+const DELEGATION_RECORD = '.claudeconf/delegation.md';
+const DELEGATION_SECTIONS = ['Rule', 'Arbiters', 'Never delegable', 'What this record is not'];
+
+/** Splits a markdown file into `## ` sections: heading text -> body. */
+function markdownSections(text) {
+  const out = new Map();
+  let heading = null;
+  let body = [];
+  for (const line of text.split('\n')) {
+    const m = /^##\s+(.+?)\s*$/.exec(line);
+    if (m) {
+      if (heading !== null) out.set(heading, body.join('\n'));
+      heading = m[1];
+      body = [];
+    } else if (heading !== null) body.push(line);
+  }
+  if (heading !== null) out.set(heading, body.join('\n'));
+  return out;
+}
+
+/**
+ * The arbiters this harness actually has. The gate invocation is derived the way the
+ * runner-pinning checks derive it — from the PATH declared in the hook config — because
+ * `hookRunner` records a name and a version but never a path, and a record naming a bare
+ * `lefthook run gate` would cite an invocation the harness deliberately does not use.
+ */
+function expectedArbiters(ctx) {
+  const out = new Set();
+  const pinned = declaredRunnerLayer(ctx)?.doc?.lefthook;
+  const runner = ctx.manifest?.hookRunner?.name ?? 'lefthook';
+  out.add(`${typeof pinned === 'string' && pinned ? pinned : runner} run gate`);
+  for (const c of ctx.manifest?.projectChecks ?? []) {
+    if (c && typeof c.name === 'string' && c.name) out.add(c.name);
+  }
+  const wf = ctx.manifest?.ci?.workflow;
+  if (typeof wf === 'string' && wf) out.add(wf);
+  return out;
+}
+
+/** The backticked strings listed under `## Arbiters`, in order. Prose elsewhere is not read. */
+function recordedArbiters(sections) {
+  const body = sections.get('Arbiters');
+  if (body === undefined) return null;
+  const out = [];
+  for (const line of body.split('\n')) {
+    const m = /^\s*-\s+`([^`]+)`/.exec(line);
+    if (m) out.push(m[1]);
+  }
+  return out;
+}
+
+function checkDelegationSections(ctx, r) {
+  const file = DELEGATION_RECORD;
+  const { text, error } = safeRead(join(ctx.root, file));
+  if (text === null) {
+    r.add('A16', 'FAIL', `${file}: missing (${error})`, { file });
+    return;
+  }
+  const sections = markdownSections(text);
+  const missing = DELEGATION_SECTIONS.filter((h) => !sections.has(h));
+  const empty = DELEGATION_SECTIONS.filter((h) => sections.has(h) && !sections.get(h).trim());
+  if (missing.length) {
+    r.add('A16', 'FAIL', `${file}: required section(s) absent: ${missing.join(', ')}`, { file });
+  } else if (empty.length) {
+    r.add('A16', 'FAIL', `${file}: required section(s) empty: ${empty.join(', ')}`, { file });
+  } else {
+    r.add(
+      'A16',
+      'PASS',
+      `${file}: all ${DELEGATION_SECTIONS.length} required section(s) present and non-empty (section presence only; the prose is not read)`,
+      { file },
+    );
+  }
+
+}
+
+/**
+ * D9 — the recorded arbiters against the ones the harness has. Emitted by the DRIFT group,
+ * not the artifact group that owns A16: an id must be registered under the group that emits
+ * it, or a crash in that group deletes it from the report instead of failing it.
+ *
+ * Silent when the record is missing or has no `## Arbiters` section — A16 has already failed
+ * on exactly that, and a second FAIL restating it would bury the one that names the cause.
+ */
+function checkDelegationArbiters(ctx, r) {
+  const file = DELEGATION_RECORD;
+  const { text } = safeRead(join(ctx.root, file));
+  if (text === null) return;
+  const recorded = recordedArbiters(markdownSections(text));
+  if (recorded === null) return;
+  const expected = expectedArbiters(ctx);
+  const listed = new Set(recorded);
+  const quote = (xs) => xs.map((a) => `\`${a}\``).join(', ');
+  const absent = [...expected].filter((a) => !listed.has(a));
+  const stale = [...listed].filter((a) => !expected.has(a));
+  if (absent.length || stale.length) {
+    const parts = [];
+    if (absent.length) parts.push(`declared by the harness but absent from the record: ${quote(absent)}`);
+    if (stale.length) parts.push(`named in the record but not declared by the harness: ${quote(stale)}`);
+    r.add('D9', 'FAIL', `${file}: arbiter set disagrees with the harness — ${parts.join('; ')}`, {
+      file,
+    });
+  } else {
+    r.add('D9', 'PASS', `${file}: arbiter set matches the harness (${quote([...expected])})`, {
+      file,
+    });
+  }
 }
 
 function readdirSafe(dir) {
@@ -5686,6 +5840,7 @@ function checkDrift(ctx, r, level) {
   checkShim(ctx, r, level);
   checkCodeowners(ctx, r);
   checkRunnerVersion(ctx, r);
+  if (level >= 5 && manifest?.agentUse === true) checkDelegationArbiters(ctx, r);
 }
 
 /**

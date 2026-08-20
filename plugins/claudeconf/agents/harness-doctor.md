@@ -40,6 +40,13 @@ EXACTLY — read it first, every run. Non-negotiables, restated:
   bypass — via `--online` `gh api`) can raise §4.7 findings to `enforced`.
   Report `runtimeIsolation: not-configured` unless OS-level sandboxing is
   actually set up.
+- **The delegability record is DECLARED, never enforced** (profile ≥5). `A16` and `D9`
+  establish that `.claudeconf/delegation.md` exists with its required sections and that
+  the arbiters it names are the ones the harness has. Neither establishes that those
+  arbiters are sufficient, and nothing establishes that any agent read the file or
+  followed it. Report it beside the configured-vs-enforced summary and in the same
+  terms — a reader who takes a `PASS` here as "delegation is under control" has been
+  told something the check did not check.
 - **Offline by default.** Only run registry/`gh api` probes when the user asked
   for `--online`; name the network access in the report either way.
 

@@ -103,12 +103,22 @@ Injects ONE bounded line of context at session start, built from
 schema-validated manifest values only (never free text):
 
 > claudeconf harness, profile <constitutionVersion> (declared): run
-> `<runner-specific gate command>` before any PR.
+> `<runner-specific gate command>` before any PR. Delegation rule:
+> see `.claudeconf/delegation.md`.
 
 "Declared", not "verified" — the hook reports what the manifest claims, the gate
 verifies it. The template is FIXED and the ONLY values interpolated into it are
 `constitutionVersion` and the runner's gate command; nothing else, because manifest
 strings become prompt context. Do not enumerate the full tool list.
+
+The second sentence is a literal pointer, added at profile ≥5, and it is a POINTER
+rather than a summary on purpose: the rule is long enough that any one-line
+paraphrase of it would drop either the licensing half or the forbidding half, and a
+half-rule read at session start is worse than a pointer to the whole one. The
+advisory is the only channel the HARNESS controls that reliably reaches an agent's
+context — a project's own instruction files reach it too, but the harness does not own
+them and may not edit them — which is why the record gets a line here at all. It stays
+two sentences, and the record stays the authority (§7).
 
 This entry and the edit-tier format hook are managed at ENTRY level: a re-run
 rewrites exactly the entries the manifest names in `agentHardening.managedHooks[]`
@@ -133,3 +143,32 @@ gate. The authoritative gates remain commit/push hooks and CI.
 its RECORDED profile: evidence-driven, advisory, read-only; PASS only with cited
 evidence, UNKNOWN on ambiguity; `--online` (registry + `gh api` protection
 probes) is opt-in. See `doctor-checklist.md` for the procedure.
+
+## 7. Delegability record (§4.7 rule 4, profile ≥5)
+
+`.claudeconf/delegation.md` is where the harness tells the agents working in the
+project when delegating to a cheaper or faster model is safe. The rule is two-sided —
+delegate when one of the project's own deterministic verifiers decides the result,
+never when the mistake could survive all of them — and both halves ship, because the
+two failure modes are symmetric: an agent that fans work out with no criterion, and an
+agent that never fans out because nothing told it what makes fanning out safe.
+
+Generate it from the manifest, never from prose about the project:
+
+- The arbiters are the PINNED gate invocation (the runner path the hook config declares
+  plus the gate subcommand), every `projectChecks[].name`, and `ci.workflow` — the same
+  values the wiring checks already reconcile. Deriving them anywhere else is how the
+  record drifts. Note the gate arbiter is not readable from the manifest alone: the
+  runner PATH lives in the hook config, which is exactly why the checker derives it the
+  same way the runner-pinning checks do rather than from `hookRunner` alone.
+- The non-delegable floor is fixed: the §4.7.1 control plane, the ledger, the
+  manifest, and the record itself. An arbiter's verdict on a change to the things
+  that define what arbiters check is circular, so no verdict licenses that change.
+- Wording is agent-agnostic. Naming a particular runtime's orchestration primitives
+  dates the file to a release cycle, and a stale instruction read by an agent is worse
+  than no instruction: it is followed.
+
+What the record is NOT: a control. The checker verifies the arbiters are named
+consistently with the manifest — not that they are sufficient, and not that any agent
+read the file. That is the same `configured` versus `enforced` distinction §4.7 draws
+about branch protection, and it belongs in the doctor's report the same way.

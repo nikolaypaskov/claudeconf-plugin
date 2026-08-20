@@ -53,7 +53,11 @@ the checker cannot run at all.
    milestones, pin rules, tiers incl. gate+ci, `ci.auditors` (profile ≥2),
    `agentUse` + `hookRunner{name,version}` (profile ≥3), `projectChecks` +
    `agentHardening` + `hookRunner.runnerPinned` (profile ≥4).
-2. Artifact existence per the recorded profile (contract §3.2).
+2. Artifact existence per the recorded profile (contract §3.2). At profile ≥5 with
+   `agentUse: true` that includes `.claudeconf/delegation.md` with its four §1.2
+   elements, and its `## Arbiters` set agreeing with the manifest in both directions.
+   Report it as what it is — a declared rule, not an enforced one: the arbiters being
+   named correctly says nothing about whether any agent followed them.
 3. Wiring: every manifest tier has a matching hook/CI entry; gate carries the
    full battery; format advisory; managed `uses:` SHA/digest-pinned;
    `persist-credentials: false`; auditors wired (profile ≥2); ledger check wired

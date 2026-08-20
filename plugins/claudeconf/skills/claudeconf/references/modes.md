@@ -74,6 +74,7 @@ rewrite the whole PIN CLOSURE in one change:
 | the CI workflow | image digests and the human-readable version comments beside them |
 | the version-assertion script | the asserted versions, including the hook runner's |
 | the hook runner | its `min_version`, and a re-run of the runner's `install` if the runner version moved |
+| `.claudeconf/delegation.md` (profile ≥5) | nothing, unless the pinned RUNNER PATH moved — the record names the gate invocation, so a runner that relocates makes the record name an invocation that no longer exists |
 
 A pin updated in one place and not the others is drift you introduced. The checker
 reconciles pins across the manifest, the lockfile, the version-assertion script, the

@@ -207,6 +207,10 @@ Record the CONFORMANCE claim too, or the harness claims a profile it does not sa
 `agentHardening { denyPatterns, managedHooks }` whenever `agentUse` is true. Each has field
 rules in harness-contract.md §2.3, and each is checked.
 
+The manifest is also the SOURCE for the delegability record (§1.2): its arbiter list is
+derived from `hookRunner`, `projectChecks[]`, and `ci.workflow`, so those fields have a
+second consumer and a wrong value there now shows up twice.
+
 ## Step 6 — Wire the artifacts (ownership first, then idempotent blocks)
 
 Generate EVERY row of harness-contract.md §1 — that table is the field-level spec and it is
@@ -258,6 +262,12 @@ These six are the rows a generator gets wrong, and each is an ownership decision
   CODEOWNERS entries for the control plane you just generated, the suppression ledger plus
   its check at gate and CI, the deny module and SessionStart advisory
   (`references/agent-hardening.md`).
+- **The delegability record is derived from the MANIFEST** (`agentUse: true`): write
+  `.claudeconf/delegation.md` to the §1.2 format, listing as arbiters exactly the pinned
+  gate invocation, every `projectChecks[].name`, and `ci.workflow`. Derive
+  them from the manifest you just wrote — not from what you remember wiring — because the
+  checker compares the two sets and a record assembled from memory is where they diverge.
+  Keep the wording agent-agnostic: no vendor's orchestration primitives.
 
 Then make re-runs safe: update managed blocks IN PLACE (`# >>> claudeconf managed >>>` …
 `# <<< claudeconf managed <<<`), NEVER clobber or duplicate user-authored config outside

@@ -239,3 +239,33 @@ Then the shared procedure resumes at step 3: the checker at profile 4 in enforci
 mode, the executable verify of pre-commit and gate, the human-review gate with the
 classification table and the checker output as its evidence, and the
 `constitutionVersion` bump last.
+
+## 4 → 5
+
+Profile 5 adds one artifact and one obligation on an existing one. It is the smallest
+delta in the series: no ownership moves, no new tier, nothing to reclassify. Everything
+the record names is already recorded in the manifest — the migration is writing it down
+where the agents working in the repository will read it, and wiring the two checks that
+keep it from rotting.
+
+- **Write `.claudeconf/delegation.md`** to the contract §1.2 format: `## Rule`,
+  `## Arbiters`, `## Never delegable`, `## What this record is not`. Derive the arbiter
+  list from the harness rather than from memory — the pinned gate invocation (the runner
+  path the hook config declares plus the gate subcommand), every `projectChecks[].name`,
+  and `ci.workflow`. Deriving it any other way is precisely the drift `D9` exists to
+  catch, and it will catch yours.
+- **Extend the SessionStart advisory** to the two-sentence template: the declared profile
+  and gate command as before, then the pointer at the record. Both interpolated values are
+  now reconciled against the manifest, so an advisory left at `profile 4` FAILS after the
+  bump — expected, and the reason this step comes before the bump rather than after.
+- **Extend CODEOWNERS** to `.claudeconf/delegation.md` wherever the existing derived
+  entries do not already cover `.claudeconf/`. The record is on the protected surface: it
+  states what may be delegated, so an unreviewed edit to it widens what may be delegated.
+
+Then the shared procedure resumes: the checker at profile 5 in enforcing mode, the
+human-review gate, and the `constitutionVersion` bump last.
+
+**What does NOT happen to a harness that stays at 4.** Nothing. `A16`, `D9`, and the
+advisory reconciliation are level-5 checks; a profile-4 harness runs the profile-4 set and
+reports the upgrade as INFO. If you see new failures on a profile-4 harness after taking
+this release, that is a bug in the checker, not a migration you owe.
