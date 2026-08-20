@@ -66,9 +66,15 @@ export default defineConfig({
 });
 ```
 
-Install: `npm i -D @playwright/test && npx playwright install chromium`
+Install: `npm i -D @playwright/test` — pinned, then `node_modules/.bin/playwright install
+chromium` to fetch the browser.
 
-Run: `npx playwright test`
+Run: `node_modules/.bin/playwright test`
+
+Both invoke the PINNED project-local binary. No on-demand package runner in any form —
+`npx` (with or without `-y`), `pnpm dlx`, `uvx`, `pipx run` — because it resolves whatever is
+cached under that name, which is the one shape contract §3.3 and wiring-principles §1 forbid
+everywhere, and `W15` fails it.
 
 ### supertest (Node API)
 

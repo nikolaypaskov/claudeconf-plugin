@@ -5,17 +5,19 @@ holding a claudeconf harness. It is ADVISORY and read-only: report, never fix.
 
 ## Ground rules
 
-- **Run on a high-capability model.** PASS/FAIL judgments hinge on whether cited
-  evidence is SUFFICIENT, and no downstream verifier re-checks that judgment —
+- **Run on a high-capability model.** The bundled checker (step 0) decides every
+  check it covers; what remains for the model is judging whether cited evidence is
+  SUFFICIENT for the rest, and no downstream verifier re-checks that judgment —
   UNKNOWN-on-ambiguity is a prompt policy, not a mechanical safeguard, so a
-  cheaper model can false-PASS. (A plugin-bundled deterministic checker is the
-  planned profile-4 mitigation; until then, do not route the doctor down.)
+  cheaper model can false-PASS. Until the checker covers a check, judgment is
+  model work.
 
 - **Validate against the RECORDED profile.** Read `constitutionVersion` from
   `.claudeconf/manifest.json` and apply that profile's checks (profile 2 lacks
-  §4.7 artifacts — their absence is not a failure there; report "profile 3
-  upgrade available" instead). Unknown/missing profile → the report is UNKNOWN,
-  not FAIL.
+  §4.7 artifacts — their absence is not a failure there; report the upgrade to the
+  current profile instead). Unknown/missing profile → the report is UNKNOWN, not
+  FAIL. (An ENFORCING run fails on it — but that is the gate's mode, not the
+  doctor's; see step 0.)
 - **Three verdicts.** PASS requires cited evidence (the exact file/line or the
   exact command + output). Anything ambiguous, unreadable, or unprobeable is
   UNKNOWN — never guessed. FAIL requires the same evidence standard as PASS.
@@ -32,20 +34,39 @@ holding a claudeconf harness. It is ADVISORY and read-only: report, never fix.
 
 ## Default (offline, static) checks
 
+Step 0 is the deterministic one and runs first; checks 1–5 are what the model
+reads to interpret what step 0 could not establish, and the manual fallback when
+the checker cannot run at all.
+
+0. **Run the bundled deterministic checker** (constitution §4.8):
+   `node "${CLAUDE_PLUGIN_ROOT}/skills/claudeconf/scripts/claudeconf-check.mjs" --root . --format json --advisory`
+   Its PASS and FAIL verdicts are AUTHORITATIVE and are never overturned by
+   reading the tree; the model interprets the UNKNOWNs and adds probes 6–8.
+   `--advisory` is the doctor's mode: UNKNOWN stays UNKNOWN and the run exits 0,
+   because the doctor reports and does not gate — no advisory run ever declares a
+   harness conforming. The enforcing default, where an unverifiable critical check
+   fails, is what the gate job and CI use (contract §3.6). If `node` is
+   unavailable, every mechanical check is UNKNOWN and the manual list below is all
+   there is — say so in the report rather than presenting a read-through as
+   equivalent.
 1. Manifest completeness per the recorded profile (contract §3.1): nine
    milestones, pin rules, tiers incl. gate+ci, `ci.auditors` (profile ≥2),
-   `agentUse` + `hookRunner{name,version}` (profile ≥3).
+   `agentUse` + `hookRunner{name,version}` (profile ≥3), `projectChecks` +
+   `agentHardening` + `hookRunner.runnerPinned` (profile ≥4).
 2. Artifact existence per the recorded profile (contract §3.2).
 3. Wiring: every manifest tier has a matching hook/CI entry; gate carries the
    full battery; format advisory; managed `uses:` SHA/digest-pinned;
    `persist-credentials: false`; auditors wired (profile ≥2); ledger check wired
-   (profile ≥3).
+   (profile ≥3). At profile ≥4 hook wiring is read from the MERGED configuration
+   AND the raw layers, since the merge hides a project-layer job that disables a
+   managed one by name (contract §3.3).
 4. Drift: manifest pins vs the versions configs/lockfiles actually reference;
    lockfile present + frozen installs; `git config core.hooksPath` /
    runner-installed hooks actually pointing at the runner. Executor ambiguity
    (which package provides a binary) → UNKNOWN, not a guess.
 5. Profile status: recorded profile vs current — report "upgrade available"
-   with the §6 migration path when behind; never "invalid".
+   with the §6 migration path (`references/migrations.md`) when behind; never
+   "invalid".
 
 ## `--online` (opt-in; discloses network access)
 
@@ -64,5 +85,7 @@ holding a claudeconf harness. It is ADVISORY and read-only: report, never fix.
 ## Report shape
 
 Group by profile section; one line per check: `PASS|FAIL|UNKNOWN — <evidence>`.
+Reproduce the checker's verdicts as it reported them and mark which lines are model
+judgment, so a reader can tell the deterministic result from the interpretation.
 End with: profile status, configured-vs-enforced summary for §4.7,
 `runtimeIsolation` state, and the three most valuable next actions (advisory).

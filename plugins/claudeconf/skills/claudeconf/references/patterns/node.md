@@ -22,12 +22,33 @@ Mined from `src/policy/catalog/node.ts` in the `cli-prototype` tag.
 ## Notes
 
 - **Node instances of the generic `wiring-principles.md`:**
-  - Hooks invoke project-local tools via `npx <tool>` or `node_modules/.bin/<tool>`
-    (bare names exit 127 in a hook); global scanners (`trufflehog`/`semgrep`) stay
-    bare. (§1)
+  - Hooks invoke project-local tools by their pinned path,
+    `node_modules/.bin/<tool>` (bare names exit 127 in a hook); global scanners
+    (`trufflehog`/`semgrep`) stay bare. NEVER `npx` / `npm exec`, in any form: an
+    on-demand runner resolves by bin name and fetches an unrelated registry
+    package when the devDependency is missing (observed for `tsc`, `biome`, and
+    `lefthook`), and the no-install flag is no escape — a cached foreign package
+    of the same name satisfies it. (§1)
   - Whole-repo `biome format .` / `lint .` must exclude generated + nested configs via
     `files.includes`, e.g. `["**", "!.claudeconf", "!.claude"]`. (§4)
   - `vitest run --coverage` needs `@vitest/coverage-v8` pinned to the `vitest` version. (§2)
+- **A `.husky/` directory or a `lint-staged` block in `package.json` means the project
+  ALREADY has a hook runner — never install lefthook alongside it.** husky points
+  `core.hooksPath` at `.husky/` while lefthook writes `.git/hooks/*`, so whichever installed
+  last is the one git runs and the other's checks silently stop. Offer either "migrate"
+  (each existing command becomes a named job in the PROJECT-OWNED root `lefthook.yml` with a
+  `projectChecks` entry; husky's and lint-staged's config and hooks are deleted in the same
+  change; only a command the human ADOPTS at the review gate moves into the managed
+  `.claudeconf/lefthook.yml`) or "preserve", the latter only if all three constitution §5
+  criteria hold — which for husky/lint-staged they normally do not, since neither expresses
+  the gate tier.
+- **The Node RUNTIME is a pin too.** Emit the current Active LTS major (check
+  nodejs.org's release schedule — an even major goes Active LTS in the October of its
+  release year and Maintenance a year later) into a `.nvmrc` the workflow reads with
+  `node-version-file:`, so a developer's shell and CI cannot disagree. `engines.node` is a
+  different field: it is the project's SUPPORT floor, and with the managed
+  `.npmrc engine-strict=true` a raised floor turns any of the project's own jobs on an older
+  Node into a hard `EBADENGINE` install failure. Raise it only as a project decision.
 - **Biome** handles both format and lint in one binary — avoids the
   ESLint + Prettier split. If the project is already on ESLint/Prettier that's
   fine; use those and skip the migration.
@@ -43,9 +64,10 @@ Mined from `src/policy/catalog/node.ts` in the `cli-prototype` tag.
 - **Conventional commits** — wire `commitlint` (`@commitlint/cli` +
   `@commitlint/config-conventional`, both pinned) at a `commit-msg` hook so commit
   messages are enforced, not merely requested. lefthook supports `commit-msg`:
-  `run: npx commitlint --edit {1}`.
+  `run: node_modules/.bin/commitlint --edit {1}`.
 - **Supply-chain on `build`** (CI) — for anything published, generate an SBOM
-  (e.g. `npx @cyclonedx/cyclonedx-npm --output-file sbom.json`) and attach build
+  (e.g. `@cyclonedx/cyclonedx-npm` as a pinned devDependency, invoked as
+  `node_modules/.bin/cyclonedx-npm --output-file sbom.json`) and attach build
   provenance with `actions/attest-build-provenance` (`id-token: write` +
   `attestations: write`, scoped to the build job only). See `ci-github-actions.md`.
 - **Supply-chain admission (constitution §4.6), npm/pnpm instantiation:**

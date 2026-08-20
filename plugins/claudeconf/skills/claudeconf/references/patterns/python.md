@@ -20,6 +20,12 @@ Mined from `src/policy/catalog/python.ts` in the `cli-prototype` tag.
 
 ## Notes
 
+- **The Python RUNTIME is a pin too.** Emit the current stable minor (python.org's
+  release schedule; a minor ships each October and is supported five years) into a
+  `.python-version` the workflow reads with `python-version-file:` — `uv` reads the same
+  file, so the venv, the developer's shell and CI agree. `requires-python` is a different
+  field: it is the SUPPORT floor the project promises its consumers, and developing on the
+  current stable while still supporting an older minor is the normal state, not a conflict.
 - **Ruff** handles both format and lint in one tool — avoids the Black + Flake8
   split. If the project is already on Black + isort + Flake8 that's fine; map
   them to the same tiers.

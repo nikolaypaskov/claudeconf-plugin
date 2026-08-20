@@ -61,18 +61,41 @@ in a scanner exclude file, a broadened ignore glob, a disabled rule).
 ## 3. Editor-side deny module (default-on, defense-in-depth)
 
 `permissions.deny` entries in `.claude/settings.json` make secret-bearing paths
-invisible to the agent: `.env`, `.env.local`, `.env.*.local`, `secrets/**`,
-`**/id_rsa*`, `**/*.key`. Named residual gaps — say them, do not paper over them:
+invisible to the agent. Every pattern is `**/`-anchored so a nested path is covered
+as well as a root one (`apps/api/.env` is not otherwise matched), and each shape is
+denied for Read AND Edit:
+
+`**/.env`, `**/.env.local`, `**/.env.*.local`, `**/secrets/**`, `**/id_rsa*`,
+`**/id_ed25519*`, `**/id_ecdsa*`, `**/*.key`
+
+The exact strings the harness owns are recorded verbatim in the manifest as
+`agentHardening.denyPatterns`, so a re-run reconciles its own set and leaves
+project-added deny entries untouched (contract §2.3). Named residual gaps — say
+them, do not paper over them:
 
 - Deny rules cannot express exceptions, so `.env.example` must not match the
   patterns you deny (keep `.env.example` out of the denied shapes rather than
   denying `.env*` wholesale); blanket `**/*.pem` would also hide public certs.
-- Deny rules govern the editor's own tools; a spawned interpreter
-  (`python -c 'open(".env")'`) is NOT covered. Permission rules are
-  defense-in-depth. High-assurance autonomous use needs OS-level sandboxing and
-  protected environment variables (see the platform's sandboxing documentation);
-  a harness that has not configured that isolation reports
-  `runtimeIsolation: not-configured`.
+- **Deny rules govern the editor's Read/Edit tools only — Bash is not covered**
+  (`cat .env` runs, and so does a spawned interpreter). This module narrows
+  ACCIDENTAL exposure; it is not isolation. High-assurance autonomous use needs
+  OS-level sandboxing and protected environment variables (see the platform's
+  sandboxing documentation); a harness that has not configured that isolation
+  reports `runtimeIsolation: not-configured`.
+
+The same gap applies to HOOKS, for the same structural reason: a `PreToolUse` hook
+is bound to a matcher over TOOL names, so a hook matching `Edit|Write|MultiEdit`
+never sees `Bash`, and an edit blocked at the editor tool can be written as the
+identical bytes through a shell heredoc. That is observed, not hypothetical: during
+this profile's own development a `security-guidance` plugin hook with matcher
+`Edit|Write|MultiEdit` blocked an edit to a semgrep rules file — the file
+legitimately contains the literal pattern the rule matches on — and the implementing
+agent completed the same edit through `Bash` without the hook firing. Two things
+follow. Tool-scoped hooks and deny rules are defense-in-depth against ACCIDENT,
+never a boundary against INTENT; the deterministic gates at commit, gate, and CI,
+behind a merge boundary a human owns, are the boundary (constitution §4.7). And a
+matcher that fires on file CONTENT rather than on effect false-blocks legitimate
+security work, which is a second reason not to place authority there.
 
 ## 4. SessionStart advisory hook (default-on)
 
@@ -83,8 +106,16 @@ schema-validated manifest values only (never free text):
 > `<runner-specific gate command>` before any PR.
 
 "Declared", not "verified" — the hook reports what the manifest claims, the gate
-verifies it. Do not enumerate the full tool list; manifest strings become prompt
-context, so keep the template fixed and the interpolation validated.
+verifies it. The template is FIXED and the ONLY values interpolated into it are
+`constitutionVersion` and the runner's gate command; nothing else, because manifest
+strings become prompt context. Do not enumerate the full tool list.
+
+This entry and the edit-tier format hook are managed at ENTRY level: a re-run
+rewrites exactly the entries the manifest names in `agentHardening.managedHooks[]`
+and leaves every other key and entry in `.claude/settings.json` alone. The manifest
+is the AUTHORITATIVE record of that ownership — a `_claudeconf` marker inside an
+entry is human-readable convenience, since properties nested in a third party's
+settings schema are not a record this harness controls (contract §2.3).
 
 ## 5. Stop hook — experimental opt-in ONLY
 

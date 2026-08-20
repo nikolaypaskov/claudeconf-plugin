@@ -30,7 +30,13 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# The header above — name / on / permissions / concurrency — plus the `jobs:` key
+# is written ONCE and stays PROJECT-OWNED; the managed block below wraps ONLY the
+# managed jobs, so a regeneration cannot swallow the project's own (contract §1,
+# wiring-principles §9). Keep the header to those keys: workflow-level `env` or
+# `defaults` would alter managed jobs from outside the block.
 jobs:
+# >>> claudeconf managed >>>
   harness:
     runs-on: ubuntu-latest   # macos-latest for Swift / Apple toolchains
     steps:
@@ -56,34 +62,32 @@ jobs:
         # never a `|| npm install` fallback (wiring-principles §8).
         run: npm ci                                     # REPLACE: uv sync --locked / mix deps.get / …
 
-      # ── Milestone gates (tier order) — invoke project-local tools (npx/…) ───
-      - name: format check (advisory)
-        run: npx biome format .                         # REPLACE with the stack formatter
+      # ── Milestone gates (tier order) ────────────────────────────────────────
+      # Step NAMES are the managed tokens (contract §2.4) — a parenthetical for
+      # humans may follow, but the token comes first, because managed steps are
+      # located by token and never by prose. Invoke project-local tools by their
+      # PINNED PATH, never through an on-demand runner (wiring-principles §1).
+      - name: format-check (advisory)
+        run: node_modules/.bin/biome format .           # REPLACE with the stack formatter
         continue-on-error: true                         # format is advisory (constitution §2)
       - name: lint
-        run: npx biome lint .                           # REPLACE
+        run: node_modules/.bin/biome lint .             # REPLACE
       - name: typecheck
-        run: npx tsc --noEmit                           # REPLACE
-      - name: unit + coverage
-        run: npx vitest run --coverage                  # REPLACE
+        run: node_modules/.bin/tsc --noEmit             # REPLACE
+      - name: unit-coverage
+        run: node_modules/.bin/vitest run --coverage    # REPLACE
       - name: e2e
-        run: npx vitest run test/integration/           # REPLACE per interface (e2e.md)
+        run: node_modules/.bin/vitest run test/integration/   # REPLACE per interface (e2e.md)
       - name: build
         run: npm run build                              # REPLACE
-      - name: dependency audit (advisory)
+      - name: dependency-audit (advisory)
         run: npm audit --audit-level=high || true       # REPLACE; advisory, never blocks
-
-  # Supply-chain review on PRs: blocks newly-introduced vulnerable deps and
-  # disallowed licenses. Fulfils the gate-tier "license/dependency review" (§1).
-  dependency-review:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@<40-char-sha>            # v4.x
-      - uses: actions/dependency-review-action@<40-char-sha>   # v4.x
-        with:
-          fail-on-severity: high
-          # deny-licenses: GPL-3.0, AGPL-3.0            # set a license policy for the project
+      # Harness infrastructure — both REQUIRED, both run in the local gate too.
+      - name: suppressions
+        run: node scripts/check-suppressions.mjs        # REPLACE: project's own runtime
+      # `project-checks` is required even when projectChecks[] is empty.
+      - name: project-checks
+        run: node scripts/check-project-checks.mjs      # REPLACE: project's own runtime
 
   security:
     runs-on: ubuntu-latest
@@ -92,13 +96,13 @@ jobs:
       # Secret scan (whole tree). MUST exclude .git/ + lock files + vendored trees —
       # the exclude file is REGEXES (security.md, wiring-principles.md §5). Images
       # are pinned by immutable DIGEST; the comment records the tag Dependabot bumps.
-      - name: secret scan
+      - name: secret-scan
         uses: docker://trufflesecurity/trufflehog@sha256:<digest>   # <x.y.z>
         with:
           args: filesystem . --no-update --no-verification --fail --exclude-paths .claudeconf/trufflehog-exclude.txt
       # SAST — pinned offline ruleset. The default is a SEED; vendor a curated pack
       # at a SHA or add CodeQL for real coverage (security.md).
-      - name: SAST (semgrep)
+      - name: sast (semgrep)
         uses: docker://semgrep/semgrep@sha256:<digest>              # <x.y.z>
         with:
           args: semgrep scan --error --quiet --config .claudeconf/rules/
@@ -114,7 +118,31 @@ jobs:
       - name: actionlint (workflow syntax + shellcheck)
         uses: docker://rhysd/actionlint@sha256:<digest>             # <x.y.z>
       - name: zizmor (workflow security audit)
-        run: pipx run zizmor==<x.y.z> .github/workflows/
+        # No `pipx run` / `uvx` — a managed step never fetches tooling at run time
+        # (constitution §4.2, contract §3.3). Provision the pinned auditor first
+        # (hash-locked venv, digest-pinned image, or a SHA-pinned action) and
+        # invoke it by that pinned path.
+        run: <provisioning script> && <venv>/bin/zizmor .github/workflows/
+# <<< claudeconf managed <<<
+
+  # ── Project-owned jobs go BELOW the block ───────────────────────────────────
+  # A regeneration rewrites the block, never what follows it. Declare each job in
+  # .claudeconf/manifest.json projectChecks[] (name + tiers + a `run` substring)
+  # so a regeneration that loses one FAILS instead of passing quietly.
+  #
+  # Supply-chain review on PRs: blocks newly-introduced vulnerable deps and
+  # disallowed licenses. `dependency-review` is not a managed name (contract
+  # §2.4), so it is emitted here on first generation and owned by the project
+  # afterwards — not rewritten by a re-run.
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@<40-char-sha>            # v4.x
+      - uses: actions/dependency-review-action@<40-char-sha>   # v4.x
+        with:
+          fail-on-severity: high
+          # deny-licenses: GPL-3.0, AGPL-3.0            # set a license policy for the project
 ```
 
 ## Conventions
@@ -127,6 +155,14 @@ jobs:
   supply-chain inputs. Docker-image actions are pinned by immutable `@sha256:`
   digest — an exact tag is mutable and can be repointed just like `@v4`
   (wiring-principles §8); record the human-readable tag in the trailing comment.
+- **Ownership: the managed block wraps ONLY the managed jobs.** The workflow header
+  (`name`, `on`, `permissions`, `concurrency`, and `jobs:`) is emitted once on first
+  generation and is project-owned thereafter — constrained to exactly those keys, with
+  no duplicate job ids. Project jobs go BELOW the block and are declared in the
+  manifest's `projectChecks[]`. A region that spans the whole file has no "outside",
+  and the next regeneration deletes whatever the project added (wiring-principles §9).
+  Because the header is project-owned, a regeneration cannot restore a trigger someone
+  narrowed: the trigger check (contract §3.3) is the only place that is catchable.
 - **Least-privilege `permissions:`.** Set `permissions: contents: read` at the top and
   escalate per-job only where required (e.g. `attestations: write` on a build job that
   signs provenance). Never rely on the default broad token.

@@ -60,6 +60,10 @@ trufflehog filesystem . --no-update --no-verification --fail \
   --exclude-paths .claudeconf/trufflehog-exclude.txt
 ```
 
+In GitHub Actions this is the digest-pinned image as a `uses:` step with `args:`, never a
+`run: docker run …` line: `uses:` is what Dependabot can bump, and the trailing comment
+records the human-readable tag (see `ci-github-actions.md` for the exact shape).
+
 The exclude file has two non-obvious requirements:
 
 - **Each line is a REGEX, not a glob.** trufflehog compiles every line as a

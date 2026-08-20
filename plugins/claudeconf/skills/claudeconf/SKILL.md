@@ -17,25 +17,64 @@ approval.
 Route by VERIFIABILITY — and "verifiable" means semantically checked by a
 deterministic verifier downstream, not merely schema-valid or exiting 0:
 
-- **Most capable model, maximum reasoning** — every step that CREATES decisions
-  the verifiers then enforce: detection (Step 2 — errors mis-scope everything),
-  brainstorm (Step 3), research and tool selection (Step 4), the contract
-  (Step 5), the INTEGRATION of Step 6 (scope/exclusion/scanner-rule/e2e-fidelity
-  choices are semantic; a subtly wrong but schema-valid wiring passes checks),
-  and the human-review-gate presentation (Step 8). Adversarial review of the
-  result, any time, is top-tier work.
-- **Delegable to cheaper/faster models or subagents** — pure FAN-OUT whose
-  outputs deterministic checks fully arbitrate: applying an already-decided
-  wiring pattern across files/fixtures, running the Step 7 self-verify commands
-  and registry confirmations (scripts and pinned tools decide; the model only
-  reads their output), and mechanical rewrites (version bumps, lockfile
-  regeneration) that the executable gate re-proves.
-- Verification itself is never model work. If a cheaper model's error would
-  survive the §3 checklist plus the executable gate, that task was not delegable.
+- **Most capable model, maximum reasoning** — every step that CREATES decisions the
+  verifiers then enforce: detection (Step 2 — errors mis-scope everything), brainstorm
+  (Step 3), research and tool selection (Step 4), the contract (Step 5), the INTEGRATION
+  of Step 6 (scope, exclusions, scanner rules, e2e fidelity and OWNERSHIP are semantic; a
+  subtly wrong but schema-valid wiring passes every check), the ownership gate, and the
+  Step 8 presentation. Adversarial review of the result is top-tier work at any time.
+- **Delegable to cheaper/faster models or subagents** — pure FAN-OUT that deterministic
+  checks fully arbitrate: applying an already-decided pattern across files, running Step 7's
+  commands and registry confirmations (the scripts decide; the model reads their output),
+  and mechanical rewrites the executable gate re-proves.
+- Verification itself is never model work. If a cheaper model's error would survive the
+  checker plus the executable gate, that task was not delegable.
+
+## Modes — decide this BEFORE Step 1
+
+| Mode | Use it when | Steps |
+| --- | --- | --- |
+| `generate` | default: no harness, or the user asks for one | 1–9 |
+| `upgrade` | the harness moves to a newer conformance profile | 1–2, then `modes.md` + the `migrations.md` delta, then 6–9 |
+| `refresh` | tool VERSIONS move inside the current profile | 1–2, then `modes.md`, then 4–9; the profile never changes |
+
+Pick by explicit user intent ("upgrade my harness", "refresh the pins"). Otherwise read
+`.claudeconf/manifest.json`: a recorded `constitutionVersion` BEHIND the
+`constitution-version` marker in `constitution.md` means you OFFER `upgrade` and let the
+user choose. Never upgrade a harness nobody asked you to upgrade.
+
+**`upgrade` and `refresh` both require `references/modes.md`** — read it in full first; it
+holds each mode's order, the checker runs that frame it, and the full pin closure a
+`refresh` rewrites. Two things are repeated HERE because getting either wrong is
+unrecoverable:
+
+- `upgrade` **STOPS TWICE** — at the ownership gate below, before ANYTHING moves, and again
+  at the ordinary Step 8 gate.
+- `constitutionVersion` is the **LAST** thing written. The field selects the checks the
+  harness is judged by, so bumping it early makes every later verification answer the wrong
+  question.
+
+### The ownership gate (`upgrade` only — STOP; nothing moves before it)
+
+Present a table covering EVERY job in the existing hook config and EVERY job and step in
+the CI workflow, and take a per-row decision from the human:
+
+| job / step | where it lives today | managed or project-owned | why |
+
+**Everything defaults to project-owned, whatever it is called.** A name matching a contract
+§2.4 managed token is not evidence of ownership — a project's own `lint`, `build`, `unit`,
+or `e2e` job is entirely plausible, and absorbing it is the failure this profile closes. A
+row becomes managed only by explicit approval here or a positive provenance match; profile 3
+recorded no per-job provenance, so for 3→4 the answer is always the human. Say it at the
+gate in these terms: **approving a job as "managed" authorises every future regeneration to
+rewrite or delete it**, and that mis-classification is how a project's own check disappears
+while the gate stays green. The reverse error costs only a redundant declaration — which is
+why the default is asymmetric. Settle every managed-name COLLISION the same way, ADOPT or
+RENAME, never silently either (migrations.md Steps A and B carry the mechanics).
 
 ## Step 1 — Load the invariants
 
-Read both reference documents in full before touching the project. They are the source
+Read the reference documents in full before touching the project. They are the source
 of truth for everything that follows; if anything below seems to conflict with them, the
 reference wins.
 
@@ -47,23 +86,22 @@ reference wins.
   ALL THREE §5 criteria hold).
 - `references/harness-contract.md` — the OUTPUT spec: the required artifact set, the
   `.claudeconf/manifest.json` schema and field rules, and the self-verify checklist.
-- `references/wiring-principles.md` — the technology-AGNOSTIC correctness principles for
-  wiring any harness so it actually runs unattended (project-local tool resolution in
-  hooks, coverage providers, CI runner/setup matching the stack, formatter/scanner
-  scoping, verify-by-executing, execute-the-bits-you-pinned). These bind regardless of
+- `references/wiring-principles.md` — the technology-AGNOSTIC correctness principles that
+  make a harness actually run unattended: project-local tool resolution, coverage
+  providers, CI runner/setup, formatter and scanner scoping, verify-by-executing,
+  execute-the-bits-you-pinned, and ownership-before-sentinels (§9). They bind regardless of
   which tools you research — instantiate them per project.
-- `references/agent-hardening.md` — the constitution §4.7 instantiation guide:
-  control-plane ownership derivation, the suppression approval ledger, the
-  editor-side deny module + SessionStart hook, and the honest limits
-  (configured ≠ enforced; permissions ≠ isolation). Binds whenever `agentUse` is
-  true — which is the default.
+- `references/agent-hardening.md` — the §4.7 instantiation guide: control-plane ownership
+  derivation, the suppression ledger, the deny module + SessionStart hook, and the honest
+  limits (configured ≠ enforced; permissions ≠ isolation). Binds whenever `agentUse` is
+  true, which is the default.
+- `references/migrations.md` — the per-profile delta lists and the procedure around them,
+  and `references/modes.md` — the mechanics of `upgrade` and `refresh`. Both are REQUIRED in
+  those two modes; skip both in `generate`, which always emits the current profile.
 
-The patterns under `references/patterns/` (one per stack — node, python, elixir, swift,
-kotlin — plus `security.md`, `ci-github-actions.md`, `e2e.md`) are REFERENCE ANCHORS,
-not mandates. Read the relevant ones for orientation in Step 4; you may diverge from them
-when current research or the project's existing tooling justifies it. The tier placement
-and blocking/advisory semantics from the constitution are fixed; the specific tool that
-fills each slot is not.
+The patterns under `references/patterns/` (one per stack, plus `security.md`,
+`ci-github-actions.md`, `e2e.md`) are REFERENCE ANCHORS, not mandates — orientation for
+Step 4, which is where the rule that governs them is stated.
 
 ## Step 2 — Detect the project
 
@@ -78,6 +116,19 @@ Inspect the working directory to determine:
   front-end/back-end split. A repo may have more than one stack; cover all of them.
 - **Existing harness pieces.** Note any pre-existing hook runner config, CI workflow,
   formatter/linter/test/SAST tools, and e2e suite. You will preserve these.
+- **An existing hook runner — NEVER install a second one.** Look for a runner's hook
+  directory or config file, a staged-files runner declared in the package manifest, or the
+  ecosystem's equivalent (`.husky/`, a `lint-staged` block in `package.json`,
+  `.pre-commit-config.yaml`, `prek`, …). Two runners cannot coexist — they claim the same
+  `.git/hooks/*` or `core.hooksPath`, so the last one installed wins and the other's checks
+  silently stop running. Offer exactly two options at the review gate:
+  - **Migrate to lefthook** — each existing command becomes a NAMED job in the PROJECT-OWNED
+    root `lefthook.yml` with a `projectChecks` entry, and the old runner's config and
+    installed hooks are REMOVED in the same change. A preserved command enters the managed
+    `.claudeconf/lefthook.yml` only if the human ADOPTS it as a generated milestone at the
+    gate; a matching name never authorises that, and a preserved name colliding with the
+    managed set is RENAMED out of it (contract §2.4).
+  - **Preserve the existing runner** — only when all three constitution §5 criteria hold.
 
 ## Step 3 — NEW project only: brainstorm first
 
@@ -95,22 +146,31 @@ milestones — `format`, `lint`, `typecheck`, `unit`, `e2e`, `sast`, `secret-sca
 stack.
 
 - **Research is primary; the anchors are only a starting point.** Treat
-  `references/patterns/` as thin, optional orientation — never a mandate. Research (web
-  search, the project's docs, the ecosystem's de-facto standards, and current best
-  practices for modern AI-assisted-coding harnesses) the best tool for THIS project per
-  milestone and its latest stable version. The harness must fit the project in front of
-  you, not a template; if an anchor is stale or a poor fit, diverge. Whatever tools you
-  pick are subject to the generic `references/wiring-principles.md`.
+  `references/patterns/` as thin, optional orientation — never a mandate. Research the best
+  tool for THIS project per milestone and its latest stable version (web search, the
+  project's docs, the ecosystem's de-facto standards). The harness must fit the project in
+  front of you, not a template; if an anchor is stale or a poor fit, diverge. Whatever you
+  pick is subject to `references/wiring-principles.md`.
+- **Research the RUNTIME version too.** It is the one pin a harness inherits rather than
+  chooses, and it goes stale silently — no milestone check notices an EOL runtime. Look up
+  the current Active LTS (or the ecosystem's equivalent) against its own release schedule,
+  confirm it is not EOL on the generation date, and NEVER emit an EOL runtime. Record it in
+  a version FILE the CI reads (`.nvmrc`, `.python-version`, `.tool-versions`) and point the
+  setup step at that file, so a developer's shell and CI cannot disagree. Raising the
+  project's declared SUPPORT floor (`engines.node`, `requires-python`) is a DIFFERENT
+  decision and belongs to the project: it drops support for that project's users, and
+  alongside a strict-engine setting it turns the project's own jobs on an older runtime into
+  a hard install failure — a harness breaking a project-owned check from a distance.
 - **Prefer the project's existing tool** when it already covers a milestone with
   equivalent coverage (e.g. ESLint/Prettier instead of switching to Biome) — do not force
   a migration that creates churn without benefit.
-- Preserve the security conventions from `references/patterns/security.md`: secret scans
-  and SAST must be deterministic and network-free (no live verification, no `--config
-  auto`, pinned offline rulesets). The exact tool may differ; the offline/pinned
-  convention is kept. Be honest about coverage: the default rulesets are SEED-level, so
-  do not present a green SAST/secret-scan check as a security guarantee — offer to vendor
-  a curated ruleset at a pinned commit (or add CodeQL at CI) and pair secret-scan with
-  server-side push protection (see security.md).
+- Preserve the security conventions from `references/patterns/security.md`: secret scan and
+  SAST are deterministic and network-free (no live verification, no auto-config, pinned
+  offline rulesets). The tool may differ; the offline/pinned convention is kept. Be honest
+  about coverage — the default rulesets are SEED-level, so a green SAST or secret-scan check
+  is not a security guarantee. Offer to vendor a curated ruleset at a pinned commit, and
+  pair secret-scan with server-side push protection (local hooks are bypassable and do not
+  scan history).
 - Decide the hook runner per the constitution §5 rule: **lefthook** unless all three
   criteria for an ecosystem-standard runner hold, in which case document the choice with
   a short rationale.
@@ -140,73 +200,105 @@ joined string like `"biome + ruff"`. Keep the manifest free of volatile fields �
 timestamps, no dates, no random seeds — so re-running on the same choices yields a
 byte-identical file.
 
-## Step 6 — Wire the artifacts (idempotent, managed blocks)
+Record the CONFORMANCE claim too, or the harness claims a profile it does not satisfy:
+`constitutionVersion` equal to the `constitution-version` marker in `constitution.md`;
+`hookRunner` as `{ name, version, runnerPinned }`; `projectChecks[]` — always present, and
+`[]` is an explicit declaration that the project owns no checks, never an omission; and
+`agentHardening { denyPatterns, managedHooks }` whenever `agentUse` is true. Each has field
+rules in harness-contract.md §2.3, and each is checked.
 
-Generate the full artifact set from harness-contract.md §1, writing each one so a re-run
-is safe. As you wire each tool you researched, apply every principle in
-`references/wiring-principles.md` — that is where harnesses actually break (hook tool
-resolution, coverage providers, CI runner/setup, formatter/scanner scoping):
+## Step 6 — Wire the artifacts (ownership first, then idempotent blocks)
 
-- **Git-hook config** — `lefthook.yml` (default) or the ecosystem-standard runner's config
-  when §5 allows. Wire every `pre-commit` / `pre-push` / `gate` milestone into its tiers.
-- **CI workflow** — `.github/workflows/ci.yml`, mirroring the gate tier, covering all nine
-  milestones, with pinned action versions (see `references/patterns/ci-github-actions.md`).
-- **Edit-tier hook** — a `format` entry in `.claude/settings.json`: non-blocking, silent on
-  success, NOT placed in a blocking tier. Include the scope-guard wrapper here if the
-  harness is for a pentest engagement.
-- **E2E scaffold + config** — identify the project's PRIMARY INTERFACE (web UI / HTTP
-  service / CLI / library / mobile) and scaffold an autonomous suite that drives it: at
-  least one test plus the framework config, runnable unattended with no live external
-  credentials (see `references/patterns/e2e.md` — pick by interface, never a browser
-  default). The suite directory fits the project (`e2e/` for a UI, the integration-test
-  dir for a CLI/service). Record the framework + suite path.
-- **Pinned tool configs** — one config file per tool a milestone uses (e.g. formatter,
-  test runner, e2e, the pinned offline SAST ruleset), each pinning its tool version.
-- **Agent-hardening artifacts** (`agentUse: true`, the default) — control-plane
-  CODEOWNERS entries derived from the artifacts you just generated, the
-  `.claudeconf/suppressions.json` ledger + its check script wired into gate + CI,
-  and the `.claude/settings.json` deny module + SessionStart advisory hook
-  (see `references/agent-hardening.md`). Print configured-vs-enforced honestly.
-- **Manifest** — write the contract from Step 5 to `.claudeconf/manifest.json`.
+Generate EVERY row of harness-contract.md §1 — that table is the field-level spec and it is
+normative. Apply every principle in `references/wiring-principles.md` as you wire each tool
+you researched: that is where harnesses actually break (hook tool resolution, coverage
+providers, CI runner/setup, formatter and scanner scoping).
 
-Idempotency is mandatory (constitution §4.4): when inserting into files that may already
-exist or hold user config, use **MANAGED BLOCKS** delimited by sentinel comments (e.g.
-`# >>> claudeconf managed >>>` … `# <<< claudeconf managed <<<`). Update the managed block
-in place on re-run; NEVER clobber or duplicate user-authored config outside the block.
+**Ownership is decided BEFORE sentinels** (constitution §4.4, wiring-principles §9): a
+sentinel block says where you WRITE, not what you OWN, and **a managed region only protects
+what is outside it** — where one top-level key holds every job there is no outside, and a
+wholesale rewrite takes the project's own jobs with it.
+
+These six are the rows a generator gets wrong, and each is an ownership decision:
+
+- **Git-hook config is SPLIT** — `.claudeconf/lefthook.yml` wholly managed (every generated
+  job, no sentinels, rewritten wholesale) + the PROJECT-OWNED root `lefthook.yml` carrying
+  one managed block: the `extends` list, plus any runner setting the runner does not merge
+  across `extends` — determine which by EXECUTING the runner in hand, never from its
+  documentation. Pin the runner (path, abort-on-missing, minimum version) and then re-run
+  its `install`, because those values are baked into the hook shims. Project-owned jobs go
+  BELOW the block; managed HOOK JOB names come from the closed set (contract §2.4), which is
+  closed because the runner MERGES same-named jobs across layers. A §5 runner with
+  no composition mechanism keeps a single-file managed region — record that `projectChecks`
+  is then the ONLY protection a project-owned check has, an asymmetry rather than parity.
+- **The CI managed block wraps ONLY managed jobs and steps**, and POSITION is what makes a
+  CI job managed — being inside the region. Its job id is FREE: name it whatever fits the
+  project, because nothing locates a CI job by its id (contract §2.4). Managed STEP names
+  are not free — each must LEAD with its milestone's §2.4 token, since that is how a step is
+  located. The header — `name`, `on`, `permissions`, `concurrency`, and the `jobs:` key
+  itself — is written once OUTSIDE the block, stays project-owned, and is held to exactly
+  that allowlist: workflow-level `env`/`defaults` alter managed jobs from outside, and a
+  duplicate job id shadows a managed one. Project jobs go below the block, under a comment
+  saying so.
+- **The project-check assertion is generated in the project's OWN runtime** — one of the
+  manifest's `stacks[]` already requires it — with zero third-party dependencies, wired at
+  gate AND CI even when `projectChecks` is empty. It is what makes a regeneration that drops
+  a project-owned check loud. No scripting runtime at all → omit it and record
+  `projectChecks: []` plus `projectChecksRationale`, never a foreign dependency.
+- **`.claude/settings.json` is managed at ENTRY level, never as a whole file.**
+  `agentHardening.managedHooks[]` is the authoritative record of the entries you own; a
+  re-run rewrites exactly those and nothing else. The edit-tier `format` entry parses its
+  payload with the project's own runtime by an absolute project-rooted path (no global
+  helper, no bare interpreter, no on-demand package runner) and excludes lockfiles from its
+  glob. Scope-guard wrapper here for a pentest engagement.
+- **The e2e suite must DRIVE the project's primary interface** (web UI / HTTP service / CLI
+  / library / mobile), unattended and with no live external credentials — pick by interface,
+  never a browser default (`references/patterns/e2e.md`).
+- **Agent-hardening artifacts are DERIVED, not hardcoded** (`agentUse: true`, the default):
+  CODEOWNERS entries for the control plane you just generated, the suppression ledger plus
+  its check at gate and CI, the deny module and SessionStart advisory
+  (`references/agent-hardening.md`).
+
+Then make re-runs safe: update managed blocks IN PLACE (`# >>> claudeconf managed >>>` …
+`# <<< claudeconf managed <<<`), NEVER clobber or duplicate user-authored config outside
+them, and declare what the PROJECT owns in `projectChecks` on the other side of the
+boundary.
 
 For an EXISTING / on-the-go project, fill gaps **ADDITIVELY**: keep the project's working
-tools, CI steps, and configuration; only add the missing milestones/artifacts and your
-managed blocks. Do not overwrite a working formatter, test runner, CI job, or e2e suite.
+tools, CI steps, and configuration; add only the missing milestones/artifacts and your
+managed blocks. A preserved check stays PROJECT-OWNED, renamed out of the managed set if it
+collides; only a check the human ADOPTS at the Step 8 gate becomes managed. A milestone then
+ends up covered TWICE — the preserved check and your pinned one — and that is the INTENDED
+result, not a defect to tidy away: absorbing the project's job is exactly what the ownership
+split forbids.
 
 ## Step 7 — Self-verify
 
-Run the self-verify checklist from harness-contract.md §3 in order. Any failing check
-aborts with an actionable error naming the missing/invalid item; the harness is NOT
-complete until all pass. In particular confirm:
+Whether a harness conforms is decided by a deterministic checker, not by reading it
+(constitution §4.8). Run it FIRST, and let it decide every check it covers:
 
-- The manifest exists, is valid JSON, has all nine milestone keys, every entry has a
-  non-empty `tool`, a `version` that is not a floating range (no `^ ~ > < = * x X`, except
-  the literal `"n/a"`), and a non-empty `tiers` array covering the default tiers.
-- All required artifacts exist (git-hook config, CI workflow, the `.claude/settings.json`
-  edit-tier `format` hook, the non-empty e2e suite, a pinned config per manifest tool; and
-  for a pentest context, the scope-guard wrapper plus a `.scope` file).
-- Milestone wiring is correct: each milestone is wired into every tier in its `tiers`
-  array; `format` is at the edit hook and not in a blocking tier; `e2e` is in CI and the
-  gate tier.
-- An executable run passes: the pre-commit hook runs with every command actually
-  EXECUTED (not skipped) and exits 0. A clean tree with no staged changes is
-  insufficient — file-scoped commands skip and no tool is invoked. Force real
-  execution (a representative staged file, or `lefthook run pre-commit
-  --all-files` / `--force`) and confirm no command fails with `command not found`
-  / exit 127 — this is what proves every tool resolves on the hook's `PATH`.
-- The GATE tier runs green too: run the full whole-repo gate sequence locally
-  (full format/lint/typecheck, unit + coverage, e2e, SAST, whole-tree
-  secret-scan, build — e.g. `lefthook run gate` or each CI command), not just
-  pre-commit. Pre-commit is staged-scoped and won't surface CI-only failures — a
-  missing coverage provider, a whole-repo formatter hitting generated/nested
-  configs, or a secret scanner flagging `.git`. Catch them now, before the gate.
-- Idempotency: re-running this procedure with identical inputs leaves `git status` clean
-  (no new or modified files).
+- **Run the bundled checker:** `node <plugin-root>/skills/claudeconf/scripts/claudeconf-check.mjs
+  --root . --enforce` — from a plugin install `<plugin-root>` is `${CLAUDE_PLUGIN_ROOT}`.
+  `--enforce` is the default and the mode this procedure uses: "cannot verify" is not a
+  pass, so an unsupported or missing profile, a malformed managed region, an unparseable
+  artifact, and any critical check that cannot be established all FAIL. Its PASS and FAIL
+  verdicts are AUTHORITATIVE — you interpret only the UNKNOWNs and never overturn either.
+  **ATTACH ITS FULL PER-CHECK OUTPUT TO THE STEP 8 GATE**: the verdicts are the evidence the
+  human reviews. Any FAIL means the harness is not complete — fix it and re-run.
+- The checker READS the tree; it cannot RUN the harness, and it never becomes part of one
+  (contract §3.6 — nothing a generated harness executes may invoke this skill). Three checks
+  therefore stay yours (contract §3.4/§3.5), and they are where harnesses actually break:
+  - **An executable pre-commit run**, every command EXECUTED rather than skipped, exit 0. A
+    clean tree with nothing staged is insufficient — file-scoped commands skip, no tool is
+    invoked, and tool resolution is left unproven. Force it (a representative staged file,
+    or the runner's all-files / force mode) and confirm nothing exits 127.
+  - **The GATE tier green too** — the whole-repo sequence CI mirrors. Pre-commit is
+    staged-scoped and hides CI-only failures: a missing coverage provider, a whole-repo
+    formatter hitting generated or nested configs, a secret scanner flagging `.git`.
+  - **Idempotency** — re-running with identical inputs leaves `git status` clean.
+
+The registry confirmation from Step 5 is also yours: the checker never touches the
+network.
 
 ## Step 8 — HUMAN-REVIEW GATE (mandatory; STOP here)
 
@@ -219,6 +311,19 @@ STOP and present to the user, then WAIT for explicit approval before continuing:
    fully supported.
 2. **The diff** — the full set of files created or modified (and, for an existing project,
    confirmation that working config was preserved and changes are additive).
+3. **The checker's per-check output**, unedited (Step 7). PASS and FAIL are the deterministic
+   evidence; name every UNKNOWN and say what you concluded from it and why.
+4. **Each control's BOUND, stated with the control.** `configured` is not `enforced` — the
+   harness can scaffold CODEOWNERS and print the branch-rule checklist, only a human can
+   apply it. The suppression gate's pattern set is incomplete by construction, so a clean
+   result says what it compared, never that no weakening occurred. Default SAST and
+   secret-scan rulesets are seed-level. Provisioning verifies at INSTALL time, not at use
+   time. Deny rules govern the editor's Read/Edit only — Bash is not covered, and
+   `runtimeIsolation` is not configured. A control presented without its bound is the same
+   defect as a check that cannot fail.
+
+In `upgrade` mode this gate comes AFTER the separate ownership gate above; re-present the
+approved classification here alongside the diff, so the human sees what the approval moved.
 
 Do NOT commit at this step. If the user requests changes, revise and re-run Steps 5–7,
 then present the gate again. Only an explicit approval unblocks Step 9.

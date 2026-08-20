@@ -6,6 +6,51 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-20
+
+Profile 4: an **ownership split** (what a regeneration owns vs what the project owns) and
+**verifier-first** conformance (deterministic scripts decide whether a harness conforms,
+rather than a model reading it).
+
+The failure this closes is verified, not hypothetical: because the hook runner merges
+same-named jobs across config layers, a project-layer job named for a managed one could
+disable that check while the merged configuration still showed the correct command — the
+run printed the job as skipped and exited 0 green.
+
+### Added
+- **A deterministic checker**, `skills/claudeconf/scripts/claudeconf-check.mjs` (~54 check
+  ids), plus its vendored YAML parser. This is the first release that ships executable
+  code inside the skill. `--enforce` is the default and fails an unverifiable critical
+  check; `--advisory` is the doctor's mode and never declares a harness conforming;
+  `--profile <n>` dry-runs a target profile IN ADDITION to the recorded one.
+- **`references/migrations.md`** — the per-profile delta lists, with the 3→4 procedure's
+  two human decision points: classify every existing job, and resolve every managed-name
+  collision. Both default to project-owned.
+- **`references/modes.md`** — the mechanics of `upgrade` and `refresh`.
+- A **project-check assertion** the harness ships into the project in a runtime it already
+  has, so a regeneration that drops a project's own check fails instead of passing
+  silently.
+
+### Changed
+- The harness contract, constitution, wiring principles and agent-hardening notes were
+  amended throughout the batch. Several rules that had been stated as closed sets of NAMES
+  are now stated as properties — a name is not an identity, and a config value is not a
+  resolution.
+- `agents/harness-doctor.md` now runs the bundled checker as step 0. The agent is outside
+  the skill sync boundary, so this does not carry across on its own.
+
+### Upgrading an existing harness
+Ask the skill to upgrade the project; it reads the recorded profile from
+`.claudeconf/manifest.json` and applies delta lists one profile at a time (2→4 is 2→3 then
+3→4, never merged), verifies by executing both tiers, and bumps `constitutionVersion`
+LAST. Run the checker with `--profile 4` first to see the cost without changing anything.
+
+Two things to expect. The upgrade may legitimately fail your harness before it fixes it —
+this project's own 3→4 had one profile-3 failure (an unpinned hook runner) that is itself
+a profile-4 control, and the procedure carries such a failure in by name. And `upgrade`
+mode has not been exercised end to end by the skill itself: both real migrations behind
+this release were performed by following `migrations.md` directly.
+
 ## [0.3.1] - 2026-07-19
 
 Documentation + capability-routing release. The shipped skill now contains the
