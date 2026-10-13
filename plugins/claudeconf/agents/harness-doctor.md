@@ -28,9 +28,11 @@ EXACTLY — read it first, every run. Non-negotiables, restated:
   unless the user EXPLICITLY requests the execution probe — and say that it
   executes project-defined commands before doing it. Never regenerate, stage,
   commit, apply rulesets, or bump the profile.
-- **Validate against the RECORDED profile** from `.claudeconf/manifest.json`.
-  Missing profile-3 artifacts on a profile-2 harness are "upgrade available",
-  not failures. Unknown profile → UNKNOWN.
+- **Validate at the profile the harness CLAIMED** — the checker's `judgedAt`: the highest
+  of the recorded `constitutionVersion`, an explicit target, and any value in the manifest's
+  history, so lowering the field changes nothing. A rule newer than that reports as INFO
+  ("newer rule … judged at N"): upgrade available, never a failure. Unknown profile →
+  UNKNOWN.
 - **Three verdicts, evidence or silence.** `PASS`/`FAIL` only with the exact
   file:line or command+output cited. Ambiguity, unreadable files, API 404s,
   permission denials, offline registries → `UNKNOWN`, never guessed, never

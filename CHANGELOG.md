@@ -6,6 +6,41 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-13
+
+Constitution **profile 6**, "field-first": the harness survives what real projects do to it.
+Every version the manifest names is a pin INTO the file that owns it, so a Dependabot bump to a
+lockfile passes the gate with no other edit; the support scripts ship in the plugin and are
+vendored, never written per project; and a harness is judged at the profile it claimed.
+
+### Added
+
+- **Typed pins** (contract §2.5): `pin: { kind, path, key }` into `package-lock.json`,
+  `uv.lock`, `.claudeconf/tools.lock.json`, a hash-locked requirement set, or a version file —
+  one fail-closed resolver shared by the checker and every vendored script. New `runtimes`
+  (Node required) and `.claudeconf/tools.lock.json` for checksum-provisioned binaries.
+- **The vendored support-script bundle**: `skills/claudeconf/scripts/harness/` is copied to a
+  harness's `.claudeconf/bin/` — the suppression ledger, the project-check assertion, the
+  version assertion, provisioning, and `scan-tree.mjs`, through which the gate's whole-tree
+  secret scan reads the INDEX, exactly what CI checks out. The checker verifies the copy
+  against `harness-catalog.json` (A17) and requires the gate and CI to run that copy.
+- **A3 updater keys**: `semver-*-days` under an ecosystem Dependabot versions without SemVer
+  (github-actions, docker, terraform, …) FAILs — the service rejects the whole file.
+- **W21**: a required CI check runs on every pull request — no `if:` beyond
+  `always()`/`success()`, no repository secret.
+- `references/migrations.md` gains the 5 → 6 delta.
+
+### Changed
+
+- **Judgment by claimed profile**: a harness is judged at the highest profile it has recorded,
+  targeted, or carried in history; a rule newer than that is INFO, never FAIL. A profile-5
+  harness acquires no new failures. The harness-doctor states this in its rules.
+- **A12** looks for a tool's config where the harness runs the tool (`root:`,
+  `working-directory`, `cd`, `npm --prefix`), so a monorepo running checks from `app/` passes.
+- The example is now [`examples/node-app/`](examples/node-app/), the dev repository's profile-6
+  exemplar copied verbatim, and CI validates it with the bundled checker instead of a manifest
+  shape check.
+
 ## [0.5.0] - 2026-08-20
 
 Constitution **profile 5**: the harness now tells the agents working in a project when

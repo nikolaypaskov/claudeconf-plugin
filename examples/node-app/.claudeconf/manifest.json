@@ -1,0 +1,205 @@
+{
+  "constitutionVersion": "6",
+  "generator": "claudeconf-skill",
+  "agentUse": true,
+  "stacks": [
+    "node"
+  ],
+  "hookRunner": {
+    "name": "lefthook",
+    "runnerPinned": true,
+    "pin": {
+      "kind": "npm-lock",
+      "key": "lefthook"
+    }
+  },
+  "milestones": {
+    "format": {
+      "tool": "biome",
+      "tiers": [
+        "edit",
+        "gate",
+        "ci"
+      ],
+      "pin": {
+        "kind": "npm-lock",
+        "key": "@biomejs/biome"
+      }
+    },
+    "lint": {
+      "tool": "biome",
+      "tiers": [
+        "pre-commit",
+        "gate",
+        "ci"
+      ],
+      "pin": {
+        "kind": "npm-lock",
+        "key": "@biomejs/biome"
+      }
+    },
+    "typecheck": {
+      "tool": "tsc",
+      "tiers": [
+        "pre-commit",
+        "pre-push",
+        "gate",
+        "ci"
+      ],
+      "pin": {
+        "kind": "npm-lock",
+        "key": "typescript"
+      }
+    },
+    "unit": {
+      "tool": "vitest",
+      "tiers": [
+        "pre-commit",
+        "pre-push",
+        "gate",
+        "ci"
+      ],
+      "pin": {
+        "kind": "npm-lock",
+        "key": "vitest"
+      }
+    },
+    "e2e": {
+      "tool": "vitest",
+      "tiers": [
+        "gate",
+        "ci"
+      ],
+      "pin": {
+        "kind": "npm-lock",
+        "key": "vitest"
+      }
+    },
+    "sast": {
+      "tool": "semgrep",
+      "tiers": [
+        "pre-push",
+        "gate",
+        "ci"
+      ],
+      "rules": {
+        "source": "hand-authored",
+        "ref": "n/a",
+        "license": "MIT"
+      },
+      "pin": {
+        "kind": "requirements",
+        "path": ".claudeconf/tools-requirements.txt",
+        "key": "semgrep"
+      }
+    },
+    "secret-scan": {
+      "tool": "trufflehog",
+      "tiers": [
+        "pre-commit",
+        "gate",
+        "ci"
+      ],
+      "pin": {
+        "kind": "tools-lock",
+        "key": "trufflehog"
+      }
+    },
+    "dependency-audit": {
+      "tool": "npm-audit",
+      "tiers": [
+        "pre-push",
+        "gate",
+        "ci"
+      ],
+      "pin": {
+        "kind": "runtime",
+        "key": "node"
+      }
+    },
+    "build": {
+      "tool": "tsup",
+      "tiers": [
+        "pre-push",
+        "gate",
+        "ci"
+      ],
+      "pin": {
+        "kind": "npm-lock",
+        "key": "tsup"
+      }
+    }
+  },
+  "ci": {
+    "provider": "github-actions",
+    "workflow": ".github/workflows/ci.yml",
+    "auditors": [
+      {
+        "tool": "actionlint",
+        "pin": {
+          "kind": "tools-lock",
+          "key": "actionlint"
+        }
+      },
+      {
+        "tool": "zizmor",
+        "pin": {
+          "kind": "requirements",
+          "path": ".claudeconf/tools-requirements.txt",
+          "key": "zizmor"
+        }
+      }
+    ]
+  },
+  "e2e": {
+    "framework": "vitest",
+    "suite": "e2e/"
+  },
+  "projectChecks": [],
+  "agentHardening": {
+    "denyPatterns": [
+      "Read(**/.env)",
+      "Edit(**/.env)",
+      "Read(**/.env.local)",
+      "Edit(**/.env.local)",
+      "Read(**/.env.*.local)",
+      "Edit(**/.env.*.local)",
+      "Read(**/secrets/**)",
+      "Edit(**/secrets/**)",
+      "Read(**/id_rsa*)",
+      "Edit(**/id_rsa*)",
+      "Read(**/id_ed25519*)",
+      "Edit(**/id_ed25519*)",
+      "Read(**/id_ecdsa*)",
+      "Edit(**/id_ecdsa*)",
+      "Read(**/*.key)",
+      "Edit(**/*.key)"
+    ],
+    "managedHooks": [
+      {
+        "event": "PostToolUse",
+        "matcher": "Edit|Write",
+        "milestone": "format"
+      },
+      {
+        "event": "SessionStart",
+        "advisory": "session-start"
+      }
+    ]
+  },
+  "runtimes": {
+    "node": {
+      "kind": "version-file",
+      "path": ".nvmrc",
+      "key": "node"
+    },
+    "python": {
+      "kind": "version-file",
+      "path": ".claudeconf/python-version",
+      "key": "python"
+    }
+  },
+  "harnessScripts": {
+    "version": "0.6.0"
+  }
+}

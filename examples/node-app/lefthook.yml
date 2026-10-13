@@ -1,0 +1,24 @@
+# Project-owned hook configuration (contract §1). The block below is the ONLY managed region
+# in this file: a regeneration rewrites it in place and PRESERVES foreign `extends` entries.
+# Everything outside it is yours.
+# >>> claudeconf managed >>>
+extends:
+  - .claudeconf/lefthook.yml
+# `lefthook:` is the runner path the installed shim consults BEFORE `PATH`. It is repeated
+# here because lefthook does NOT merge this one setting across `extends` — verified against
+# 2.1.9: with it only in .claudeconf/lefthook.yml it is absent from `lefthook dump` and the
+# shim keeps resolving a global runner, while `assert_lefthook_installed` and `min_version`
+# do merge. Managed value, kept byte-identical with .claudeconf/lefthook.yml.
+lefthook: node_modules/.bin/lefthook
+# <<< claudeconf managed <<<
+
+# ---- project-owned jobs ------------------------------------------------------------------
+# Add your own hook jobs BELOW this line and declare each one in `.claudeconf/manifest.json`
+# projectChecks[] (`name`, the `tiers` it runs at, and the `run` substring it must actually
+# execute), so a regeneration that loses one FAILS instead of passing silently. Names may not
+# collide with the managed set (contract §2.4): the runner MERGES same-named jobs across
+# `extends`, so a project job named for a managed one can disable it while the merged
+# configuration still shows the correct command.
+#
+# This exemplar declares none — `projectChecks: []` in the manifest is the explicit statement
+# that there are none, never the absence of the key.

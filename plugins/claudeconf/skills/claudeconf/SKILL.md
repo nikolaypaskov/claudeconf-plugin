@@ -183,9 +183,13 @@ stack.
 For each of the nine milestones, decide and record:
 
 1. the **tool** (exact name),
-2. the **pinned version** (exact version or hash — never a floating range like `^1.0`,
-   `>=2`, `5.x`; use the literal `"n/a"` only for tools versioned through the runtime,
-   e.g. `npm-audit`),
+2. the **pin** — a typed reference into the file that actually pins the tool, never a copied
+   version (harness-contract.md §2.5): `npm-lock`/`uv-lock` for a tool the package manager
+   installs (the lockfile entry, with the package manifest declaring that EXACT version),
+   `tools-lock` for a binary provisioned by checksum (`.claudeconf/tools.lock.json`),
+   `requirements` for a hash-locked Python tool, `runtime` for a tool that versions through
+   the runtime (e.g. `npm-audit`). The pinned version itself is exact — never `^1.0`, `>=2`,
+   `5.x`,
 3. the **tier(s)** it runs in (covering at least the default tier(s) from constitution §2).
 
 Before recording a tool+version, CONFIRM the pair exists on its registry (e.g.
@@ -202,7 +206,9 @@ byte-identical file.
 
 Record the CONFORMANCE claim too, or the harness claims a profile it does not satisfy:
 `constitutionVersion` equal to the `constitution-version` marker in `constitution.md`;
-`hookRunner` as `{ name, version, runnerPinned }`; `projectChecks[]` — always present, and
+`hookRunner` as `{ name, pin, runnerPinned }`; `runtimes` with at least `node` pinned to an
+exact version file (the vendored support scripts run on it, in every stack);
+`harnessScripts.version` = the bundle's `scripts/harness/VERSION`; `projectChecks[]` — always present, and
 `[]` is an explicit declaration that the project owns no checks, never an omission; and
 `agentHardening { denyPatterns, managedHooks }` whenever `agentUse` is true. Each has field
 rules in harness-contract.md §2.3, and each is checked.
@@ -244,11 +250,23 @@ These six are the rows a generator gets wrong, and each is an ownership decision
   that allowlist: workflow-level `env`/`defaults` alter managed jobs from outside, and a
   duplicate job id shadows a managed one. Project jobs go below the block, under a comment
   saying so.
-- **The project-check assertion is generated in the project's OWN runtime** — one of the
-  manifest's `stacks[]` already requires it — with zero third-party dependencies, wired at
-  gate AND CI even when `projectChecks` is empty. It is what makes a regeneration that drops
-  a project-owned check loud. No scripting runtime at all → omit it and record
-  `projectChecks: []` plus `projectChecksRationale`, never a foreign dependency.
+- **The support scripts are VENDORED, never written.** Copy this skill's
+  `scripts/harness/` directory — byte for byte, `lib/` included — to the project's
+  `.claudeconf/bin/` and record `harnessScripts.version`. Wire them; do not author, adapt or
+  "fix" them: every hand-written gate script the field produced was a new place for a check
+  to pass without checking, and the checker fails a vendored file that differs from the
+  bundle (A17). They are `check-project-checks.mjs` (wired at gate AND CI even when
+  `projectChecks` is empty — it is what makes a regeneration that drops a project-owned check
+  loud), `check-suppressions.mjs`, `assert-tool-versions.mjs`, `provision-tools.mjs` (reads
+  `.claudeconf/tools.lock.json`), and `scan-tree.mjs`, through which the gate runs every
+  whole-tree scanner so it scans the index, as CI does. They run on Node, in every stack: pin
+  it in `runtimes.node` and install it in CI from that version file. Exclude
+  `.claudeconf/bin/` from formatters, linters and the edit hook.
+- **Required CI checks must run on every pull request** — no `if:` beyond `always()`, no
+  repository secret: Dependabot and fork runs get none, and a skipped check reports green.
+- **Updater config uses only keys the service accepts**: `default-days` only for
+  `github-actions`, `docker` and the other ecosystems Dependabot does not version by SemVer —
+  one unsupported key makes it reject the whole file.
 - **`.claude/settings.json` is managed at ENTRY level, never as a whole file.**
   `agentHardening.managedHooks[]` is the authoritative record of the entries you own; a
   re-run rewrites exactly those and nothing else. The edit-tier `format` entry parses its

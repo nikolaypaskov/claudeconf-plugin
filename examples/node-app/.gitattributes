@@ -1,0 +1,4 @@
+# >>> claudeconf managed >>>
+# Normalized line endings protect the determinism invariant (constitution §4.3).
+* text=auto eol=lf
+# <<< claudeconf managed <<<

@@ -1,0 +1,26 @@
+# >>> claudeconf managed >>>
+# Code ownership baseline (harness-contract.md §1 repo hygiene). REPLACE @OWNER with
+# the real owning user/team, then enable branch protection + required reviews.
+* @OWNER
+
+# Control-plane ownership (constitution §4.7.1): artifacts that can weaken the
+# harness need review by an independent human owner. CONFIGURED only — the
+# enforced bar is branch rules with code-owner approval, stale-review dismissal,
+# latest-push approval, and no bypass actors.
+/.github/workflows/ @OWNER
+/.github/CODEOWNERS @OWNER
+/.github/dependabot.yml @OWNER
+/lefthook.yml @OWNER
+/.claudeconf/ @OWNER
+/.claude/ @OWNER
+/scripts/ @OWNER
+/.npmrc @OWNER
+/.nvmrc @OWNER
+/biome.json @OWNER
+/commitlint.config.js @OWNER
+/package-lock.json @OWNER
+/package.json @OWNER
+/tsconfig.json @OWNER
+/tsup.config.ts @OWNER
+/vitest.config.ts @OWNER
+# <<< claudeconf managed <<<

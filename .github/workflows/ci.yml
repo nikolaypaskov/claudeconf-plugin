@@ -21,7 +21,7 @@ jobs:
         run: |
           npm install -g @anthropic-ai/claude-code@2.1.214
           claude plugin validate --strict .
-      - name: validate example manifests (9 pinned milestones)
+      - name: validate examples with the bundled conformance checker
         run: node scripts/validate-examples.mjs
       - name: validate example YAML parses
         run: |

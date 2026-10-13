@@ -167,6 +167,25 @@ takes REGEXES; the same intent is spelled two ways, and a glob handed to a regex
 engine fails to compile. (See `patterns/security.md` for the trufflehog/semgrep
 instantiation.)
 
+**Locally, scan the CANDIDATE tree, not the working directory** (profile 6). CI checks
+out tracked content only; a developer's working directory also holds ignored build
+output, local `.env` files and untracked scratch, so a whole-tree scan of `.` at the gate
+reads files CI never sees — the source of every secret-scan false positive the field
+reported, and of the opposite error, a gate that differs from CI. Run the scanner through
+the vendored `scan-tree.mjs -- <scanner> … {tree}`, which hands it the index materialised
+in a temporary directory: exactly the content the next commit carries, and on a clean tree
+exactly what CI scans. It is scanner-agnostic — any tool that accepts a directory.
+
+## 5a. A required check runs on every pull request
+
+A CI step that answers a milestone or a declared project check must not depend on WHO
+opened the pull request. Dependabot and fork runs receive no repository secrets, and a
+step guarded by `if:` on the actor or on a secret is simply skipped there — and a skipped
+check reports GREEN. Give required checks no condition beyond `always()`/`success()` and
+no repository secret. Work that truly needs a credential is an ancillary step, not a
+required check — a Dependabot copy of the secret would still leave fork runs without it —
+and identity-based logic (it is spoofable) belongs to ancillary steps only.
+
 ## 6. Verify by EXECUTING, at the tier that actually runs the command
 
 A self-verify that does not run the tools proves nothing. A clean-tree hook run

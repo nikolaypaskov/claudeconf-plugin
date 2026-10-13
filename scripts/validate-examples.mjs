@@ -1,49 +1,57 @@
-// Validates every vendored example harness in examples/<name>/.claudeconf/manifest.json
-// against the core of the claudeconf self-verify contract: exactly the nine milestones,
-// each with a tool, a pinned (non-floating) version, and a non-empty tiers array.
-import { readdirSync, existsSync, readFileSync } from "node:fs";
+// Validates every vendored example harness in examples/<name>/ with the plugin's OWN bundled
+// conformance checker (plugins/claudeconf/skills/claudeconf/scripts/claudeconf-check.mjs) — the
+// arbiter the skill and the doctor use — rather than a second, weaker reading of the manifest.
+//
+// The checker runs in advisory mode with a PATH holding only `node` and `git`, so whatever hook
+// runner a machine happens to have installed cannot decide the result: the machine-state checks
+// (the installed runner, the installed hooks, an uninstalled dependency tree) come back UNKNOWN
+// everywhere, and any FAIL is a defect in the example's committed content.
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readdirSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-const REQUIRED = [
-  "format", "lint", "typecheck", "unit", "e2e",
-  "sast", "secret-scan", "dependency-audit", "build",
-];
+const CHECKER = 'plugins/claudeconf/skills/claudeconf/scripts/claudeconf-check.mjs';
 
-let checked = 0;
-
-for (const dir of readdirSync("examples", { withFileTypes: true })) {
-  if (!dir.isDirectory()) continue;
-  const path = `examples/${dir.name}/.claudeconf/manifest.json`;
-  if (!existsSync(path)) continue;
-
-  const manifest = JSON.parse(readFileSync(path, "utf8"));
-  const keys = Object.keys(manifest.milestones ?? {});
-  if (keys.length !== 9 || !REQUIRED.every((k) => keys.includes(k))) {
-    throw new Error(`${path}: must contain exactly the nine milestones`);
+function onPath(name) {
+  for (const dir of (process.env.PATH ?? '').split(':').filter(Boolean)) {
+    const candidate = join(dir, name);
+    if (existsSync(candidate)) return candidate;
   }
-
-  for (const [milestone, entry] of Object.entries(manifest.milestones)) {
-    if (!entry.tool) throw new Error(`${path}: ${milestone} has no tool`);
-    if (entry.version !== "n/a" && /[\^~><=*xX]/.test(entry.version)) {
-      throw new Error(`${path}: ${milestone} has a floating version "${entry.version}"`);
-    }
-    if (!Array.isArray(entry.tiers) || entry.tiers.length === 0) {
-      throw new Error(`${path}: ${milestone} has an empty tiers array`);
-    }
-  }
-
-  if (manifest.constitutionVersion === "3") {
-    if (typeof manifest.agentUse !== "boolean") {
-      throw new Error(`${path}: profile 3 requires a boolean agentUse`);
-    }
-    const hr = manifest.hookRunner;
-    if (typeof hr !== "object" || !hr?.name || !hr?.version) {
-      throw new Error(`${path}: profile 3 requires hookRunner {name, version}`);
-    }
-  }
-
-  console.log(`ok: ${path} — 9 milestones, all pinned`);
-  checked++;
+  throw new Error(`${name} is not on PATH`);
 }
 
-if (checked === 0) throw new Error("no example manifests found under examples/");
-console.log(`validated ${checked} example manifest(s)`);
+const bin = mkdtempSync(join(tmpdir(), 'claudeconf-validate-'));
+symlinkSync(process.execPath, join(bin, 'node'));
+symlinkSync(onPath('git'), join(bin, 'git'));
+
+let checked = 0;
+try {
+  for (const dir of readdirSync('examples', { withFileTypes: true })) {
+    if (!dir.isDirectory()) continue;
+    const root = join('examples', dir.name);
+    if (!existsSync(join(root, '.claudeconf', 'manifest.json'))) continue;
+
+    const r = spawnSync(
+      process.execPath,
+      [CHECKER, '--root', root, '--format', 'json', '--advisory'],
+      { encoding: 'utf8', env: { ...process.env, PATH: bin } },
+    );
+    if (r.status !== 0) throw new Error(`${root}: the checker exited ${r.status}\n${r.stderr}`);
+    const report = JSON.parse(r.stdout);
+    const count = (s) => report.results.filter((x) => x.status === s).length;
+    const fails = report.results.filter((x) => x.status === 'FAIL');
+    for (const f of fails) console.error(`FAIL ${f.id} — ${f.evidence}`);
+    if (fails.length) throw new Error(`${root}: ${fails.length} check(s) FAIL`);
+    console.log(
+      `ok: ${root} — profile ${report.profile}, judged at ${report.judgedAt}: ` +
+        `${count('PASS')} PASS, 0 FAIL, ${count('UNKNOWN')} UNKNOWN (machine state), ${count('INFO')} INFO`,
+    );
+    checked++;
+  }
+} finally {
+  rmSync(bin, { recursive: true, force: true });
+}
+
+if (checked === 0) throw new Error('no example manifests found under examples/');
+console.log(`validated ${checked} example harness(es)`);

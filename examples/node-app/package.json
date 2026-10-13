@@ -1,0 +1,33 @@
+{
+  "name": "node-app-fixture",
+  "version": "0.1.0",
+  "description": "Minimal Node/TS fixture used to dogfood the claudeconf skill.",
+  "type": "module",
+  "private": true,
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "engines": {
+    "node": ">=24",
+    "npm": ">=11.10.0"
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "test": "vitest run",
+    "test:e2e": "vitest run --config e2e/vitest.config.ts"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.0",
+    "@commitlint/cli": "21.2.2",
+    "@commitlint/config-conventional": "21.2.2",
+    "@types/node": "25.9.3",
+    "@vitest/coverage-v8": "4.1.9",
+    "lefthook": "2.1.10",
+    "tsup": "8.5.1",
+    "typescript": "6.0.3",
+    "vitest": "4.1.9"
+  }
+}
