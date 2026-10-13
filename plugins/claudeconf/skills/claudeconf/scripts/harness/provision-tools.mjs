@@ -13,7 +13,10 @@
 //     companions through PATH otherwise picks up an ambient install — observed with semgrep).
 //
 // The tools directory holds ONLY what this creates; anything else in it is a refusal, before
-// any download and again after (it goes FIRST on PATH for the whole gate).
+// any download and again after (it goes FIRST on PATH for the whole gate). It is one directory
+// PER REPOSITORY — `${RUNNER_TEMP:-$TMPDIR}/claudeconf-tools-<key>`, the key derived from the
+// repository root's real path — because each harness pins its own tool set and versions, and a
+// directory shared by every repository on the machine can hold only one lock's tools.
 //
 // USAGE  node .claudeconf/bin/provision-tools.mjs [--root <dir>] [--print-path]
 // EXIT   0 provisioned (or --print-path) · 2 usage · 3 unsupported platform
@@ -33,6 +36,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -75,8 +79,17 @@ function repoRoot(explicit) {
   return r.stdout.trim();
 }
 
-const toolsDir = () =>
-  join(process.env.RUNNER_TEMP || process.env.TMPDIR || tmpdir(), 'claudeconf-tools');
+/**
+ * The tools directory for the repository at `root`: one per repository, keyed by the root's REAL
+ * path. One machine-wide directory made every second repository refuse to provision (the
+ * directory held another lock's tools) or overwrite the first's (same tool, another version),
+ * so whichever harness provisioned last was the only one whose gate passed. A worktree or a
+ * second clone is a separate repository here and provisions its own copy.
+ */
+const toolsDir = (root) => {
+  const key = createHash('sha256').update(realpathSync(root)).digest('hex').slice(0, 16);
+  return join(process.env.RUNNER_TEMP || process.env.TMPDIR || tmpdir(), `claudeconf-tools-${key}`);
+};
 
 function platformKey() {
   const os = { linux: 'linux', darwin: 'darwin' }[process.platform];
@@ -301,7 +314,7 @@ function provisionPythonTools(root, manifest, reqTools, dir) {
 async function main(argv) {
   const opts = parseArgs(argv);
   const root = repoRoot(opts.root);
-  const dir = toolsDir();
+  const dir = toolsDir(root);
   const lock = readJson(root, LOCK_REL);
   const manifest = readJson(root, MANIFEST_REL);
   const reqTools = requirementTools(manifest);

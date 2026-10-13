@@ -6,6 +6,21 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-10-13
+
+### Fixed
+
+- **One provisioned-tools directory per repository** (harness scripts 0.6.1). The vendored
+  `provision-tools.mjs` installed every repository's pinned binaries into one machine-wide
+  `$TMPDIR/claudeconf-tools`. A second harness on the same machine then refused to provision,
+  or overwrote the first with another version of the same tool, so only the repository
+  provisioned last could pass its gate. Tools now go to
+  `${RUNNER_TEMP:-$TMPDIR}/claudeconf-tools-<key>`, keyed by the repository root's real path.
+  `--print-path` and `$GITHUB_PATH` report the new location. To take the fix, re-vendor
+  `.claudeconf/bin/` from this bundle, set `harnessScripts.version` to `0.6.1`, and
+  re-provision. Harnesses on 0.6.0 still verify, because the catalog keeps its entry. The old
+  shared directory is no longer read; delete it.
+
 ## [0.6.0] - 2026-10-13
 
 Constitution **profile 6**, "field-first": the harness survives what real projects do to it.
