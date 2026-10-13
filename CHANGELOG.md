@@ -6,6 +6,21 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-10-13
+
+### Fixed
+
+- **A8 reads only a secret scanner's exclude FILE.** Every `--exclude` in every hook and CI
+  command was collected as a secret-scan exclude file. semgrep's bare `--exclude` is a pattern,
+  so `semgrep … --exclude .claudeconf/bin` FAILed A8 for "not covering .git". Only
+  `--exclude-paths` / `--exclude-file` are read now. Checker-only: the harness scripts stay at
+  0.6.2, so nothing needs re-vendoring.
+
+### Changed
+
+- **Contract §1:** the vendored `.claudeconf/bin/` is also excluded from the project's own SAST
+  rules. A vendored file cannot carry a suppression, and a project rule is not written for it.
+
 ## [0.6.2] - 2026-10-13
 
 ### Fixed
