@@ -11,7 +11,7 @@
 // before/after verdict diff over the exemplars, this repository and six consumer repositories.
 
 import { readFileSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { basename, join, posix, resolve, sep } from 'node:path';
 
 /** Reads a file as UTF-8; never throws — `{ text: null, error }` when it cannot be read. */
 export function safeRead(path) {
@@ -191,8 +191,27 @@ export function analyseCommand(cmd, pkg, depth = 0) {
   let head = tokens[0];
   let args = tokens.slice(1);
 
+  // A runner pointed at another directory (`npm --prefix app audit`) is the same tool: the flag
+  // and its value are not part of its identity. Its scripts live in THAT directory's
+  // package.json, which `resolveIndirection` reads — resolving them here against the root's
+  // would read the wrong file, so a directed runner skips the root resolution below.
+  const dirFlags = PACKAGE_DIR_FLAGS[head];
+  let directed = false;
+  if (dirFlags) {
+    const kept = [];
+    for (let i = 0; i < args.length; i++) {
+      const assigned = /^(--[a-z]+)=/.exec(args[i]);
+      if (assigned && dirFlags.includes(assigned[1])) directed = true;
+      else if (dirFlags.includes(args[i]) && i + 1 < args.length) {
+        directed = true;
+        i++;
+      } else kept.push(args[i]);
+    }
+    args = kept;
+  }
+
   // `npm run <script>` / `npm test` — resolve through package.json scripts.
-  if (SCRIPT_RUNNERS.has(head) && pkg?.scripts && depth < 3) {
+  if (SCRIPT_RUNNERS.has(head) && !directed && pkg?.scripts && depth < 3) {
     let script = null;
     if (args[0] === 'run' || args[0] === 'run-script') script = args[1];
     else if (args[0] && !args[0].startsWith('-') && pkg.scripts[args[0]]) script = args[0];
@@ -236,6 +255,8 @@ export function resolveIndirection(ctx, command) {
   if (analysis.resolvedFrom) return null; // already resolved by the script resolver
   const tokens = tokenize(primarySegment(command));
   const head = tokens[0] ?? '';
+  const scripted = directoryScript(ctx, tokens);
+  if (scripted) return scripted;
   if (head === 'make' && tokens[1] && !tokens[1].startsWith('-')) {
     for (const name of ['Makefile', 'makefile', 'GNUmakefile']) {
       const read = safeRead(join(ctx.root, name));
@@ -264,6 +285,59 @@ export function resolveIndirection(ctx, command) {
     return { source: rel, commands: [read.text] };
   }
   return null;
+}
+
+/** The flags that point a package runner at another directory's package.json. */
+const PACKAGE_DIR_FLAGS = {
+  npm: ['--prefix'],
+  pnpm: ['-C', '--dir'],
+  yarn: ['--cwd'],
+  bun: ['--cwd'],
+};
+
+/**
+ * `npm --prefix app run lint`, `pnpm -C app test`, `yarn --cwd app build`: the script such a
+ * runner executes is defined in THAT directory's package.json, not the root's — the same reading
+ * A12 gives the directory a tool runs in. Root-only resolution left every check a monorepo runs
+ * this way unidentifiable (field: eShop, CentioSupportHarness). Returns the script body, with
+ * any arguments after `--` appended exactly as the runner appends them, or null when the runner
+ * names no directory, the directory is outside the repository, or the script does not exist.
+ * A script the body itself runs through another runner resolves against the root package.json.
+ */
+function directoryScript(ctx, tokens) {
+  let words = tokens;
+  while (words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0])) words = words.slice(1);
+  const flags = PACKAGE_DIR_FLAGS[basename(words[0] ?? '')];
+  if (!flags || !ctx?.root) return null;
+  let dir = null;
+  const rest = [];
+  for (let i = 1; i < words.length; i++) {
+    const assigned = /^(--[a-z]+)=(.+)$/.exec(words[i]);
+    if (assigned && flags.includes(assigned[1])) dir = assigned[2];
+    else if (flags.includes(words[i]) && i + 1 < words.length) dir = words[++i];
+    else rest.push(words[i]);
+  }
+  if (dir === null) return null;
+  const root = resolve(ctx.root);
+  const at = resolve(root, dir);
+  if (at !== root && !at.startsWith(root + sep)) return null;
+  const read = safeRead(join(at, 'package.json'));
+  if (read.text === null) return null;
+  let pkg;
+  try {
+    pkg = JSON.parse(read.text);
+  } catch {
+    return null;
+  }
+  const name = rest[0] === 'run' || rest[0] === 'run-script' ? rest[1] : rest[0];
+  const body = name && !name.startsWith('-') ? pkg?.scripts?.[name] : undefined;
+  if (typeof body !== 'string') return null;
+  const dash = rest.indexOf('--');
+  const extra = dash === -1 ? [] : rest.slice(dash + 1);
+  return {
+    source: `the script \`${name}\` in ${posix.join(dir.replace(/\/+$/, ''), 'package.json')}`,
+    commands: [extra.length ? `${body} ${extra.join(' ')}` : body],
+  };
 }
 
 /** Matches a manifest tool name against a command's candidate tokens. */

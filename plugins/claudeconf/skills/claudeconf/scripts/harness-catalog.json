@@ -22,5 +22,17 @@
     "lib/tool-configs.mjs": "0f87f3fb827d2d1dc10ad4409ba62f9aa21559176221a1741386cdd2d464f243",
     "provision-tools.mjs": "696a9ebb7a08c780a0b64d15550657a4ae029f5ca87c8057a460e99cb831cdd9",
     "scan-tree.mjs": "4ab57848f494a3951cab52aa3922da6e4e9c6ba32c872dcc8f5767a1e778db28"
+  },
+  "0.6.2": {
+    "VERSION": "a466ef209f5c3aee5ff0c702e2e9d5cced4783d2a655e8ab66330f21a5557b3f",
+    "assert-tool-versions.mjs": "4c9e31cbf1354863815b3780796695b0e5be473816db3a742b9460a3e9f287dd",
+    "check-project-checks.mjs": "9dc06ea24428693f6da61ab9b616cbbca24b9c3950079df8fdc1c73c9ffe4931",
+    "check-suppressions.mjs": "65d4ef66700f69f179f5df81ba93c9f43a583510b1293f442ffb0dedaf6605d4",
+    "lib/catalog.mjs": "ba9b64610bd6182d822264aaf20fa35269ddd7986a74b4459471755bba02e98c",
+    "lib/pins.mjs": "7ced966c36a6b08e23ae14e51f322f3f444c94f3221e4ff12970e50e18473b78",
+    "lib/shell.mjs": "afb544d7761c7a67c5c037347b05e0e5281b21cb77842b8d4b44cac717384fdb",
+    "lib/tool-configs.mjs": "0f87f3fb827d2d1dc10ad4409ba62f9aa21559176221a1741386cdd2d464f243",
+    "provision-tools.mjs": "696a9ebb7a08c780a0b64d15550657a4ae029f5ca87c8057a460e99cb831cdd9",
+    "scan-tree.mjs": "4ab57848f494a3951cab52aa3922da6e4e9c6ba32c872dcc8f5767a1e778db28"
   }
 }
