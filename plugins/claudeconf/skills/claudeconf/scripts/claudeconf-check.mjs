@@ -6015,11 +6015,16 @@ function collectManagedJobNames(ctx, level) {
   return uniq(names);
 }
 
-/** Exclude files named by a secret-scan command, wherever that command lives. */
+/**
+ * Exclude FILES named by a secret-scan command, wherever that command lives. Secret scanners
+ * name a file (`--exclude-paths`, `--exclude-file`); a bare `--exclude` is a PATTERN in every
+ * tool that has one — `semgrep --exclude .claudeconf/bin` — and reading it as a file failed a
+ * sast command for not covering .git (field: olymp, 0.6.3).
+ */
 function collectSecretScanExcludes(ctx) {
   const out = [];
   for (const src of commandSources(ctx)) {
-    for (const m of executableText(src.text).matchAll(/--exclude(?:-paths|-file)?[=\s]+(\S+)/g)) {
+    for (const m of executableText(src.text).matchAll(/--exclude-(?:paths|file)[=\s]+(\S+)/g)) {
       out.push({ path: m[1], where: src.where });
     }
   }
