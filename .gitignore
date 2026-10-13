@@ -14,5 +14,6 @@ Thumbs.db
 .env
 .env.*
 
-# Local Claude Code state (this repo ships .claude-plugin/, not .claude/)
-.claude/
+# Local Claude Code state (this repo ships .claude-plugin/, not .claude/). Root only: an
+# example harness's .claude/settings.json IS part of the harness it demonstrates.
+/.claude/
