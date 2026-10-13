@@ -6,6 +6,20 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-10-13
+
+### Fixed
+
+- **A package runner's scripts are resolved in the directory it names** (harness scripts
+  0.6.2, `lib/shell.mjs`). `npm --prefix app run lint`, `pnpm -C app test` and
+  `yarn --cwd app build` run the script in that directory's `package.json`. The shared
+  resolver read only the root's, so gate ≡ CI (W17) could not identify the tool behind such a
+  command, and an enforcing run FAILed a working monorepo harness. The body is now read from
+  the named directory, through chains and with arguments after `--`. A directory outside the
+  repository is never read, and `npm --prefix app audit` is identified as npm-audit. To take
+  the fix, re-vendor `.claudeconf/bin/` and set `harnessScripts.version` to `0.6.2`; the
+  catalog keeps 0.6.0 and 0.6.1.
+
 ## [0.6.1] - 2026-10-13
 
 ### Fixed
