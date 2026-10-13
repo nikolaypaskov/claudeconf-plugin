@@ -269,3 +269,81 @@ human-review gate, and the `constitutionVersion` bump last.
 advisory reconciliation are level-5 checks; a profile-4 harness runs the profile-4 set and
 reports the upgrade as INFO. If you see new failures on a profile-4 harness after taking
 this release, that is a bug in the checker, not a migration you owe.
+
+## 5 → 6
+
+Profile 6 stops a harness from failing its own gate on the most ordinary event in a
+repository's life — a dependency update — and makes the support scripts something a harness
+SHIPS rather than something each generation writes. Every step below replaces a copy with a
+reference: a version copied into the manifest becomes a pin into the file that owns it, and a
+script written per project becomes the bundle's, vendored and verified byte for byte.
+
+Order matters twice. The vendored scripts read the new pin form, so the bundle and the pins
+land in ONE change — the vendored `assert-tool-versions.mjs` refuses a manifest of literals,
+and a profile-6 manifest without the bundle fails A17. And every old script is deleted
+in the same change that rewires its callers, never before: search the hook config, the CI
+workflow and the docs for each old path, and delete only when nothing calls it.
+
+- **Vendor the bundle.** Copy the skill's `scripts/harness/` directory — `lib/` included,
+  byte for byte — to `.claudeconf/bin/`, and record `harnessScripts: { "version" }` from the
+  bundle's `VERSION`. Rewire every caller to `node .claudeconf/bin/<script>.mjs`: the
+  `suppressions`, `project-checks` and `tool-versions` gate jobs and CI steps, and the CI
+  provisioning step. Then delete what they replace — the project's own
+  `check-suppressions`, `check-project-checks` (`.mjs` and `.py`), `assert-tool-versions`
+  and `provision-tools` scripts. A17 fails a hook or CI command that still runs one of these
+  names from anywhere but `.claudeconf/bin/`. Do not port project-specific logic INTO a
+  vendored file: A17 fails any byte that differs from the bundle. A check only this project needs becomes a
+  `projectChecks` entry of its own.
+- **Pin the runtime.** Add `runtimes` with at least `node` — a `version-file` pin to an
+  exact version (`.nvmrc` holding `24.21.0`, never `lts/*` or `24`). The vendored scripts run
+  on Node in EVERY stack, so a Python-only CI job gains a SHA-pinned `setup-node` step reading
+  that file before the first vendored script runs. Pin any other runtime the harness
+  provisions against the same way.
+- **Replace every `version` with a typed `pin`** (contract §2.5) — each milestone and each
+  `tools[]` element, each `ci.auditors[]` entry, and `hookRunner`. Choose the kind by where
+  the tool is ACTUALLY pinned, never by convenience: `npm-lock` / `uv-lock` for a
+  package-manager tool (the lockfile is its only version source — and `package.json` must
+  declare that exact version, not a range), `requirements` for a hash-locked pip set,
+  `tools-lock` for a checksum-provisioned binary, `runtime` for anything that versions
+  through a runtime (it replaces `"n/a"`). A pin that does not resolve is a FAIL in every
+  check that reads it, so the checker's run after this step is the test of every choice.
+- **Move provisioning data into `.claudeconf/tools.lock.json`.** Every version, URL, sha256,
+  archive type and member the old provisioning script held, for every platform it served —
+  copied VALUE FOR VALUE from the script. Do not re-download to recompute a digest: one
+  computed from a download already trusted proves nothing (§2.5). A hash-locked requirement
+  file may stay where it is or move; the `requirements` pin names its path either way.
+- **Leave the hook runner's `min_version` alone.** At profile 6 it is a FLOOR at or below the
+  resolved runner pin, not a second copy of it — which is what lets an updater bump the
+  runner in the lockfile and nowhere else.
+- **Scan the candidate, not the working directory.** Rewire every whole-tree scanner in the
+  gate to `node .claudeconf/bin/scan-tree.mjs -- <scanner> … {tree} …` — the scanner's own
+  flags and exclude file unchanged, `{tree}` exactly once where the path argument was. It
+  scans the index, which is what CI's checkout contains; ignored and untracked files leave
+  the local scan, and they were never in CI's. CI keeps scanning its own checkout.
+- **Remove updater keys the service rejects.** Dependabot accepts `semver-*-days` only for
+  ecosystems that version by SemVer; under `github-actions`, `docker`, `terraform` and the
+  other default-days-only ecosystems it rejects the WHOLE file, so updates stop for every
+  ecosystem in it (checker A3). Keep `default-days` there.
+- **Make every required check run on every pull request** (checker W21). A CI step answering
+  a milestone or a declared project check, and the job holding it, carries no `if:` beyond
+  `always()` / `success()` and references no repository secret other than `GITHUB_TOKEN`:
+  bot and fork runs receive no repository secrets, and a skipped required check reports
+  green. Secret-needing work moves into an ancillary step; actor identity may select what
+  that step does, never whether a required check runs.
+
+**The suppression gate sees this migration, and it should.** Each deleted script is a
+`control-removal`, the moved provisioning values are `pin-change`s, and each rewritten scanner
+line still carries its exclusion. Record one ledger entry per finding, naming what REPLACES
+the control and — for the lock — that its values are the old script's, unchanged. That entry
+is the reviewer's evidence that the migration moved controls rather than dropping them.
+
+Then the shared procedure resumes: the checker at profile 6 in enforcing mode, with A17 and
+every typed pin resolving; the executable verify of pre-commit and gate; the human-review
+gate; and the `constitutionVersion` bump last. After the bump the history records 6, so the
+harness is judged at 6 from then on — lowering the field later changes nothing.
+
+**What does NOT happen to a harness that stays at 5.** A17, M13, the typed-pin rules, the
+`min_version` floor, A3's updater keys and W21 are level-6 rules; a profile-5 harness reports
+each as INFO naming the profile it arrives with. One of those INFOs is worth acting on
+without migrating: an A3 updater-key INFO means Dependabot is rejecting the file TODAY, and
+removing the key is a one-line fix that needs no profile change.

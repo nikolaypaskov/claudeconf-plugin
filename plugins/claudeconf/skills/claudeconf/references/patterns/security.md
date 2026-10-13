@@ -22,7 +22,7 @@ stack.
 | Milestone | Tier | Tool | Mode | Scope |
 | --- | --- | --- | --- | --- |
 | secret-scan | pre-commit | `trufflehog filesystem` | blocking | changed files |
-| secret-scan | gate + CI | `trufflehog filesystem .` | blocking | whole tree (with `--exclude-paths`) |
+| secret-scan | gate + CI | `trufflehog filesystem` over the candidate tree (gate: via `scan-tree.mjs`; CI: its checkout) | blocking | tracked content (with `--exclude-paths`) |
 | SAST | pre-push + gate + CI | `semgrep scan` | blocking | all |
 
 ## trufflehog: required flags
@@ -53,7 +53,16 @@ trufflehog filesystem <changed-files...> --no-update --no-verification --fail
 ## trufflehog at gate/CI: whole-tree scan + `--exclude-paths`
 
 At the gate and in CI the secret scan runs over the WHOLE tree, not just changed
-files:
+files — the TRACKED tree, which is what CI's checkout contains. At the gate (profile 6) the
+scanner runs through the vendored `scan-tree.mjs`, which hands it the index materialised
+in a temporary directory, so ignored and untracked local files are never read:
+
+```sh
+node .claudeconf/bin/scan-tree.mjs -- trufflehog filesystem {tree} \
+  --no-update --no-verification --fail --exclude-paths .claudeconf/trufflehog-exclude.txt
+```
+
+In CI the checkout already is that tree, so the same scanner runs on `.`:
 
 ```sh
 trufflehog filesystem . --no-update --no-verification --fail \

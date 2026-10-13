@@ -66,7 +66,9 @@ rewrite the whole PIN CLOSURE in one change:
 
 | where a pin lives | what to update |
 | --- | --- |
-| `.claudeconf/manifest.json` | the milestone `version` (or the `tools[]` element), `ci.auditors[*].version`, `hookRunner.version` |
+| `.claudeconf/manifest.json` | profile ≤5: the milestone `version` (or the `tools[]` element), `ci.auditors[*].version`, `hookRunner.version`; profile 6: nothing — typed pins name a SOURCE, and the source is what moves |
+| `.claudeconf/tools.lock.json` (profile 6) | the tool's `version`, `released` (from upstream), and every platform's `url`/`sha256`/`member`, copied from the release's own checksum file; refuse a release younger than the cooldown |
+| `.claudeconf/bin/` (profile 6) | re-vendored WHOLESALE from the bundle when the skill ships a newer one, with `harnessScripts.version` moved to match — never edited in place |
 | the tool's own config | any version field the config pins |
 | the dependency lockfile | regenerated with the pinned package-manager version, frozen-install mode unchanged |
 | hash-locked requirement files | recompiled against the RECORDED interpreter, with its hashes |

@@ -16,7 +16,7 @@ a contract violation; the skill must abort with an error listing the missing art
 | Artifact | Path (project-relative) | Notes |
 | --- | --- | --- |
 | **Git-hook config** (split by OWNERSHIP) | `.claudeconf/lefthook.yml` (fully managed) **+** `lefthook.yml` (project-owned) | Default runner is lefthook (constitution §5). `.claudeconf/lefthook.yml` holds EVERY generated hook, and every top-level runner setting the runner MERGES across `extends` (see the runner-pinning paragraph below — a setting the runner does not merge belongs in the root file's managed block instead, because a setting written where the runner never reads it is not a setting), carries a header comment saying it is generated and rewritten wholesale on re-run, and contains no sentinels — the whole file is the managed region. The root `lefthook.yml` is PROJECT-OWNED and carries exactly ONE managed block whose only content is an `extends` list containing `.claudeconf/lefthook.yml`; a re-run rewrites that block in place and PRESERVES foreign entries already in the list. Project-owned jobs go BELOW the block and are declared in `projectChecks` (§2.3) so a regeneration that loses one is loud. Managed and project-owned names may not collide (§2.4) and the merged result must be field-identical to the managed declaration (§3.3). The harness also PINS THE RUNNER with three settings: `lefthook: <pinned runner path>` (the path the shim consults before `PATH`), `assert_lefthook_installed: true` (a missing runner aborts the hook instead of printing a notice and exiting 0), and `min_version` equal to the manifest's `hookRunner.version`. **A runner setting must be written where the runner actually READS it, which is not necessarily the managed file.** Verified against lefthook 2.1.9: `assert_lefthook_installed` and `min_version` DO merge across `extends`, and `lefthook:` DOES NOT — it is absent from the merged dump, so a harness that pins the path only in the managed file runs every hook through whatever `PATH` supplies. Settings the runner does not merge therefore go in the ROOT file's managed block alongside the `extends` list, which is why that block is defined by ownership rather than by content. Determine mergeability BY EXECUTION for the runner and version in hand — never from documentation, and never by assuming the split behaves uniformly. Every stack needs a pinned runner path; where the ecosystem cannot provide one the manifest records `runnerPinned: false` with a rationale (§2.3) rather than implying a control that does not exist. These three values are baked into `.git/hooks/*` at install time, so ANY change to them requires re-running the runner's `install` — the post-generation checklist says so. `.pre-commit-config.yaml` may replace lefthook only when all three criteria in constitution §5 hold; it has no `extends`, so it keeps the single-file managed-region model and `projectChecks` alone protects project-owned checks. That is a recorded asymmetry, not an exemption. |
-| **Project-check assertion** | `scripts/check-project-checks.<ext>` — the extension of a runtime one of the manifest's `stacks[]` ALREADY requires (`.mjs` for a `node` stack, `.py` for a `python` stack) — plus a `project-checks` job in the managed gate and a `project-checks` step in the managed CI workflow | REQUIRED even when `projectChecks` is empty, so declaring a check later needs no rewiring. It reads the manifest and proves every declared check still resolves at every tier it claims: for `pre-commit`/`pre-push`/`gate`, a job of that name in the MERGED hook config; for `ci`, a job id or step name in `manifest.ci.workflow`. The entry's `run` substring must appear in an EXECUTED position of the resolved command — a match inside a comment or a statically dead construct does not count, and a command the assertion cannot statically resolve is reported unresolved, never satisfied. A no-op command (`true`, `:`, a bare `echo`, empty) is not satisfied either. Any miss exits non-zero listing `<name>@<tier>`; an empty `projectChecks` prints that none are declared and exits 0. It is copied into the project, so it carries ZERO third-party dependencies and runs on nothing but the project's own runtime. It cannot protect itself — that is deliberate: losing everything is loud (the job vanishes and the checker fails), and losing one job quietly is the failure this artifact closes. A project with NO scripting runtime omits this artifact and records `projectChecks: []` plus `projectChecksRationale` (§2.3) instead of acquiring a foreign dependency. |
+| **Project-check assertion** | Profile 6: the vendored `.claudeconf/bin/check-project-checks.mjs` (see *Vendored support scripts*). Profile ≤5: `scripts/check-project-checks.<ext>` — the extension of a runtime one of the manifest's `stacks[]` ALREADY requires (`.mjs` for a `node` stack, `.py` for a `python` stack) — plus a `project-checks` job in the managed gate and a `project-checks` step in the managed CI workflow | REQUIRED even when `projectChecks` is empty, so declaring a check later needs no rewiring. It reads the manifest and proves every declared check still resolves at every tier it claims: for `pre-commit`/`pre-push`/`gate`, a job of that name in the MERGED hook config; for `ci`, a job id or step name in `manifest.ci.workflow`. The entry's `run` substring must appear in an EXECUTED position of the resolved command — a match inside a comment or a statically dead construct does not count, and a command the assertion cannot statically resolve is reported unresolved, never satisfied. A no-op command (`true`, `:`, a bare `echo`, empty) is not satisfied either. Any miss exits non-zero listing `<name>@<tier>`; an empty `projectChecks` prints that none are declared and exits 0. It is copied into the project, so it carries ZERO third-party dependencies and runs on nothing but the project's own runtime. It cannot protect itself — that is deliberate: losing everything is loud (the job vanishes and the checker fails), and losing one job quietly is the failure this artifact closes. A project with NO scripting runtime omits this artifact and records `projectChecks: []` plus `projectChecksRationale` (§2.3) instead of acquiring a foreign dependency. |
 | **CI workflow** | `.github/workflows/ci.yml` | Must mirror the gate tier. Authoritative pass/fail signal for pull requests. SHA-pin every action; docker-image actions by `@sha256:` digest (constitution §4.1). The workflow is itself a supply-chain artifact: it must be checked by a PINNED syntax auditor and a PINNED security auditor for the CI provider (recorded in the manifest's `ci.auditors`; for GitHub Actions the current researched anchors are actionlint + zizmor — see `patterns/ci-github-actions.md`). The managed block wraps ONLY managed jobs (and the managed steps inside them); the workflow HEADER — `name`, `on`, `permissions`, `concurrency`, and the `jobs:` key itself — is written once outside the block on first generation and preserved on re-run, and a comment above the block tells the project to add its own jobs BELOW it. Because the header is project-owned it is constrained as an ALLOWLIST rather than left alone: no top-level key outside that list (workflow-level `env` and `defaults` alter managed jobs' execution) and no duplicate job ids (they shadow a managed definition). Trigger requirements — the workflow must actually fire pre-merge — are in §3.3. |
 | **Dependency-update config** | `.github/dependabot.yml` OR `renovate.json` | The upgrade path for a pin-everything harness — keeps pinned deps and SHA-pinned actions fresh. Covers the project's package ecosystem(s) + `github-actions`, and includes a release-age **cooldown** block (constitution §4.6). Pair it with the package manager's own minimum-release-age setting where the ecosystem has one — updater-side cooldown alone leaves the install path open. |
 | **Dependency lockfile + frozen installs** | The ecosystem's lockfile (`package-lock.json`, `pnpm-lock.yaml`, `uv.lock`, `Gemfile.lock`, …) | Committed wherever the ecosystem supports one, generated with the pinned package-manager version. Every install in hooks/CI uses the FROZEN mode (`npm ci`, `pnpm install --frozen-lockfile`, `uv sync --locked`, …) with NO fallback to fresh resolution — `npm ci \|\| npm install` silently re-resolves the tree (constitution §4.3/§4.6). |
@@ -24,11 +24,14 @@ a contract violation; the skill must abort with an error listing the missing art
 | **E2E scaffold + config** | e2e suite directory + framework config file (suite path fits the project's interface — `e2e/` for a UI, the integration-test dir for a CLI/service) | Must run unattended with no live external credentials. Framework + suite recorded in manifest. |
 | **Pinned tool configs** | One config file per tool used by a milestone | e.g. `biome.json`, `vitest.config.ts`, `playwright.config.ts`, and the vendored SAST ruleset directory `.claudeconf/rules/` (pinned rule files committed into the repo — see `patterns/security.md`). Each config pins the tool version via the project lock file or an explicit version field. |
 | **Repo hygiene** | `.editorconfig`, `.gitattributes` (`* text=auto eol=lf`), `.github/CODEOWNERS` | Baseline staples: consistent editor settings, normalized line endings (protects the determinism invariant), and code ownership. After generation, print a checklist to enable branch protection / required status checks (rulesets preferred). A generated ruleset JSON is OPTIONAL desired-state input that a human must review and import — its existence never implies protection is applied; the harness cannot change GitHub settings. |
-| **Suppression approval ledger** | `.claudeconf/suppressions.json` + a check script (e.g. `scripts/check-suppressions.mjs`) wired into gate + CI | The human-approval path for silencing a control (constitution §4.7.2). The ledger records `{fingerprint, file, rule, rationale}` per approved suppression. The check diffs against the merge base and FAILS on any added or BROADENED suppression token, or any widened config-level exclusion (scanner exclude files, ignore configs), that lacks a ledger entry. Approval = a reviewed merge of the ledger change itself — the ledger sits on the protected surface, so a code-owner review of it IS the sign-off. It ALSO fails when a control disappears from a harness file (`control-removal`), where "disappears" means its IDENTITY is gone — the job or step name — not that a line's text changed. A command that is rewritten while its identity survives is a MODIFICATION, judged by the weakening rules; calling it a removal buries one real finding under dozens of "the file moved" entries, and noise is how a real entry gets waved through. Base selection is fixed where it matters: an explicit base override is REFUSED under CI with no allowlist and no escape flag, because an env-gated exemption is self-authorizing — any workflow edit can set it — and a shallow clone in authoritative CI is an ERROR, never an empty diff, since a clone that cannot see history otherwise passes by being unable to look. Finally, this check is a NOTIFIER whose pattern set is incomplete by construction, so its output must never read as a guarantee: a clean result states what it compared, never that no weakening occurred. |
+| **Suppression approval ledger** | `.claudeconf/suppressions.json` + a check script wired into gate + CI — profile 6: the vendored `.claudeconf/bin/check-suppressions.mjs`; profile ≤5: a script such as `scripts/check-suppressions.mjs` | The human-approval path for silencing a control (constitution §4.7.2). The ledger records `{fingerprint, file, rule, rationale}` per approved suppression. The check diffs against the merge base and FAILS on any added or BROADENED suppression token, or any widened config-level exclusion (scanner exclude files, ignore configs), that lacks a ledger entry. Approval = a reviewed merge of the ledger change itself — the ledger sits on the protected surface, so a code-owner review of it IS the sign-off. It ALSO fails when a control disappears from a harness file (`control-removal`), where "disappears" means its IDENTITY is gone — the job or step name — not that a line's text changed. A command that is rewritten while its identity survives is a MODIFICATION, judged by the weakening rules; calling it a removal buries one real finding under dozens of "the file moved" entries, and noise is how a real entry gets waved through. Base selection is fixed where it matters: an explicit base override is REFUSED under CI with no allowlist and no escape flag, because an env-gated exemption is self-authorizing — any workflow edit can set it — and a shallow clone in authoritative CI is an ERROR, never an empty diff, since a clone that cannot see history otherwise passes by being unable to look. Finally, this check is a NOTIFIER whose pattern set is incomplete by construction, so its output must never read as a guarantee: a clean result states what it compared, never that no weakening occurred. |
 | **Control-plane ownership** | Entries in `.github/CODEOWNERS` (GitHub implementation of §4.7.1) | Ownership entries for the DERIVED protected surface: CI workflows, hook-runner config, tool configs, manifests + lockfiles, scanner exclude/ignore files, provisioning scripts + checksums, the suppression ledger, and CODEOWNERS itself. CONFIGURED only — the post-generation checklist names the `enforced` bar: branch rules requiring code-owner approval, dismissing stale reviews, requiring approval of the latest push, and no bypass actors. Never claim `enforced` from the file's existence. |
 | **Agent-hardening module** (`agentUse: true`) | `permissions.deny` entries + a `SessionStart` advisory hook in `.claude/settings.json` | Default-on runtime hardening: deny rules hide secret-bearing paths from the agent (defense-in-depth, NOT isolation — see `agent-hardening.md` for residual gaps), and the SessionStart hook injects a bounded, schema-validated advisory: declared profile + the runner-specific gate command ("declared", never "verified") and — at profile ≥5 — a second sentence naming `.claudeconf/delegation.md`, because a rule that lives only in a file nothing points at governs nothing. The advisory is a FIXED TEMPLATE of exactly two sentences at profile ≥5, not a place for free prose; the delegability rule itself lives in the artifact, never here. No Stop hook by default (see agent-hardening.md — experimental opt-in only). Both are managed at ENTRY level like the edit-tier hook: the SessionStart entry is listed in `agentHardening.managedHooks[]`, and the deny set is recorded verbatim as `agentHardening.denyPatterns`. A re-run reconciles against the RECORDED set — it removes those patterns, adds the current ones, and leaves project-owned deny entries alone. Patterns are `**/`-anchored so nested paths (`apps/api/.env`) are covered, and the module's note states plainly that deny rules govern Read/Edit only — **Bash is not covered** — and that `runtimeIsolation` is not configured. |
 | **Delegability record** (`agentUse: true`, profile ≥5) | `.claudeconf/delegation.md` | The generated statement of constitution §4.7 rule 4 for THIS project: work may be delegated to a less capable agent or model only when one of the arbiters the file lists decides the result, and work whose mistakes could survive all of them may not be. Fully managed — rewritten wholesale on re-run, no sentinels — and DETERMINISTIC: the content is a function of the manifest, so a no-op regeneration is byte-identical (§3.5). Four required `##` sections, specified in §1.2: `## Rule`, `## Arbiters`, `## Never delegable`, and `## What this record is not`. The arbiter list is the machine-readable part and is matched BY VALUE rather than by prose — the backticked strings must be exactly the arbiters the manifest implies, no more and no less (§3.2) — so the record cannot rot into citing a gate that no longer exists. Wording is AGENT-AGNOSTIC: it names no vendor's orchestration primitives, because the rule outlives any particular agent runtime, and a harness that hardcodes today's primitives ages into instructions that mislead. The file is guidance an agent READS; nothing in the harness executes it, which keeps constitution §4.8 intact — verification is pointed at a harness, never wired into it. |
 | **Manifest** | `.claudeconf/manifest.json` | See §2 for the complete schema. |
+| **Vendored support scripts** (profile 6) | `.claudeconf/bin/` — the skill bundle's `scripts/harness/` directory copied VERBATIM — plus `harnessScripts: { "version" }` in the manifest | The scripts the harness runs — `check-suppressions`, `check-project-checks`, `assert-tool-versions`, `provision-tools`, `scan-tree` and their `lib/` — are VENDORED, never authored per project: hand-written gates were the field's largest source of checks that passed without checking. Node runs them in every stack (`runtimes.node`, §2.5). The directory is managed and must be excluded from formatters, linters and the edit hook, because the checker judges it against the bundle's catalog for the declared version: a missing, extra, edited or symlinked file fails, and so does a `.claudeconf/bin/` with no `harnessScripts` record. Upgrading the scripts means re-vendoring a newer bundle (`refresh`), never editing them in place. |
+| **Provisioned-tool lock** (profile 6) | `.claudeconf/tools.lock.json` | Every binary the harness provisions by checksum, per platform (§2.5). The vendored `provision-tools.mjs` installs from it and `assert-tool-versions.mjs` asserts against it; nothing else repeats its versions. |
+| **Runtime pin** (profile 6) | An exact version file for each `runtimes` entry — `.nvmrc` for Node | The version the CI workflow installs the runtime from (`node-version-file`) and `assert-tool-versions.mjs` asserts the executing runtime against. |
 
 ### 1.1 Scope guard (pentest context only)
 
@@ -176,22 +179,76 @@ entry. `e2e.framework` follows the same principle (an array of
 `{ "stack", "framework" }` objects), and `e2e.suite` may be an array of suite paths —
 one per stack.
 
+### 2.5 Typed pins (profile 6)
+
+At profile 6 a version is never COPIED into the manifest. Every place the manifest names a
+version — a milestone entry and every `tools[]` element, each `ci.auditors[]` entry,
+`hookRunner` — carries `pin: { "kind", "path", "key" }` INSTEAD of `version`: a reference
+into the file that actually pins the tool. A copied literal was the field's single largest
+source of drift: every dependency-update PR changed the lockfile and left the manifest, the
+assertion script, the provisioning script and the hook config's `min_version` behind, so
+every one failed the gate. The manifest also gains `runtimes`, a map of runtime name → pin
+(`"node"` is required: the vendored support scripts run on it, §1).
+
+| `kind` | `path` (default) | `key` | resolves to |
+| --- | --- | --- | --- |
+| `npm-lock` | `package-lock.json` | package name | `packages["node_modules/<key>"].version`; the sibling `package.json` must declare `<key>` at EXACTLY that version — a range fails |
+| `uv-lock` | `uv.lock` | package name | the one `[[package]]` named `<key>`; two entries is ambiguous and fails |
+| `tools-lock` | `.claudeconf/tools.lock.json` | tool name | `<key>.version` |
+| `requirements` | (required) | package name | the one `<key>==<version>` line, which must carry `--hash` |
+| `version-file` | (required, e.g. `.nvmrc`) | runtime name | the file's single exact version (one leading `v` allowed) |
+| `runtime` | — | a `runtimes` key | that runtime's pin, resolved — for tools that version through the runtime (`npm-audit`, a repository script run by `node`); replaces `"n/a"` |
+
+**One resolver, fail closed.** Pins are resolved by ONE function shipped in the bundle
+(`harness/lib/pins.mjs`), imported by the checker and by every vendored script — there is no
+second implementation to disagree with. A pin whose source is missing, unreadable,
+malformed, ambiguous, outside the repository root (including through a symlink) or not an
+exact version does not resolve, and a pin that does not resolve is a failure, never a
+skipped comparison. The hook runner's `min_version` is a FLOOR, compared against the
+resolved version; it is not a second copy of the pin.
+
+**`.claudeconf/tools.lock.json`** pins every binary the harness provisions by checksum:
+
+```json
+{
+  "trufflehog": {
+    "version": "3.95.6",
+    "released": "2026-07-31",
+    "platforms": {
+      "linux-x64": { "url": "https://…", "sha256": "…", "archive": "tar.gz", "member": "trufflehog" }
+    }
+  }
+}
+```
+
+`platforms` keys are `<os>-<arch>` (`linux-x64`, `linux-arm64`, `darwin-x64`,
+`darwin-arm64`); `archive` is one of `tar.gz`, `gz`, `zip`, `raw`; `member` is the path of
+the executable inside the archive. Checksums are copied from the release's OWN upstream
+checksum file — a digest computed from a download already trusted proves nothing.
+Admission (constitution §4.6) is enforced mechanically, not by the `released` field:
+`refresh` records `released` from upstream and refuses a release younger than the cooldown;
+a tool CI runs from a digest-pinned image must have a `tools.lock.json` version EQUAL to the
+image's (the image moves only through the updater, with its cooldown); and any change to a
+`tools.lock.json` value is a `pin-change` the suppression gate blocks without a ledger entry.
+
 ### 2.3 Field rules
 
 | Field | Rule |
 | --- | --- |
-| `constitutionVersion` | MUST match the machine-readable `constitution-version` marker at the top of `constitution.md`. Currently `"4"` (see constitution §6 for bump/migration semantics; validators keep older profiles' checks and validate a harness against its RECORDED profile). A value no bundled profile recognises, or a missing field, is NOT a pass: an enforcing verification run fails on it (§3.6), so editing the field cannot green a harness. |
+| `constitutionVersion` | MUST match the machine-readable `constitution-version` marker at the top of `constitution.md`. Currently `"6"` (see constitution §6 for bump/migration semantics; a harness is judged at the highest profile it has claimed — the recorded value, an explicit target, or any value in the manifest's version-control history — and a rule newer than that is reported, never failed). A value no bundled profile recognises, or a missing field, is NOT a pass: an enforcing verification run fails on it (§3.6), so editing the field cannot green a harness. |
 | `agentUse` | Boolean, default `true` (constitution §4.7). `false` requires an `agentUseRationale` string, may be chosen only at the generation human-review gate, and disables every agent-hardened claim. Changing the value later is a control-plane change (§4.7.3). |
 | `generator` | Fixed string `"claudeconf-skill"`. |
 | `stacks` | One or more stack identifiers detected by the skill. Non-empty array. |
-| `hookRunner` | Object `{ "name", "version", "runnerPinned" }` — the runner (default `"lefthook"`, or the ecosystem-standard runner per constitution §5), its exact pinned version, and whether a pinned runner PATH is configured. A doctor cannot verify what it cannot identify; a bare name is a profile-2 form. |
+| `hookRunner` | Object `{ "name", "version", "runnerPinned" }` (profile ≤5) or `{ "name", "pin", "runnerPinned" }` (profile 6, §2.5) — the runner (default `"lefthook"`, or the ecosystem-standard runner per constitution §5), its exact pinned version, and whether a pinned runner PATH is configured. A doctor cannot verify what it cannot identify; a bare name is a profile-2 form. |
 | `hookRunner.runnerPinned` | Boolean, required at profile 4. `true` asserts that the managed hook config names a runner path the shim resolves before `PATH` (§1). `false` is permitted only for an ecosystem that cannot provide one and REQUIRES a `runnerPinnedRationale` string; the harness then reports the runner as unpinned rather than presenting the recorded version as a control. |
 | `milestones` | MUST contain exactly the nine milestone keys listed in §2.2. No milestone may be absent. |
 | `milestones[*].tool` | Exact tool name used. A single-tool entry has `tool` + `version`; a multi-stack entry has `tools[]` instead (§2.2.1) — never both, never a joined string. |
-| `milestones[*].version` | Exact pinned version string (or `"n/a"` for tools that version through the runtime, e.g. `npm-audit`). Floating ranges are forbidden, and so are composite strings — a version must not contain spaces or `+`. Applies to every `tools[]` element too. |
+| `milestones[*].pin` | Profile 6: the typed pin reference (§2.5) that REPLACES `version`. An entry carrying both, or a profile-6 entry carrying only `version`, fails. Applies to every `tools[]` element. |
+| `milestones[*].version` | Profile ≤5: exact pinned version string (or `"n/a"` for tools that version through the runtime, e.g. `npm-audit`, or a repository script the runtime executes, recorded as `node`). Floating ranges are forbidden, and so are composite strings — a version must not contain spaces or `+`. Applies to every `tools[]` element too. |
 | `milestones[*].tiers` | Non-empty array. Each entry must be one of: `"edit"`, `"pre-commit"`, `"pre-push"`, `"gate"`, `"ci"`. Must cover at least the default tier(s) from constitution §2 (which include `gate` + `ci` for every milestone). |
 | `ci.workflow` | Path to the CI workflow file, relative to the repository root. |
-| `ci.auditors` | Non-empty array of `{ "tool", "version" }` — the pinned SYNTAX auditor and SECURITY auditor for the CI provider's workflow format (constitution §4.1 applied to the workflow itself). Versions obey the same pin rules as milestones. Auditors are recorded here, never as a tenth milestone. |
+| `runtimes` | Profile 6, required: `{ "<runtime>": <pin> }` with at least `"node"` (§2.5). Each value is a typed pin, usually `version-file`; a `runtime` pin elsewhere refers to one of these keys. |
+| `ci.auditors` | Non-empty array of `{ "tool", "version" }` (profile ≤5) or `{ "tool", "pin" }` (profile 6, §2.5) — the pinned SYNTAX auditor and SECURITY auditor for the CI provider's workflow format (constitution §4.1 applied to the workflow itself). Versions obey the same pin rules as milestones. Auditors are recorded here, never as a tenth milestone. |
 | `milestones.sast.rules` | OPTIONAL provenance for the vendored SAST ruleset: `{ "source", "ref", "license" }`. Rules copied from a third-party pack MUST record the real source URL and an immutable commit `ref`; `"source": "hand-authored"` + `"ref": "n/a"` are valid ONLY for rules authored in this repository — never as an escape hatch for vendored content. |
 | `e2e.suite` | Path to the e2e suite directory, relative to the repository root — or an array of paths for a multi-stack project (§2.2.1). |
 | `projectChecks` | Array, REQUIRED at profile 4. It declares the checks the PROJECT owns, so a regeneration that drops one fails instead of passing silently. An empty array is valid and is an explicit statement that the project declares no checks — it is never the same as an absent key, and the harness reports "none declared", never "none detected". |
@@ -395,9 +452,15 @@ considered complete until all checks pass.
   wrapper; `.scope` file exists at the repository root.
 - [ ] E2E scaffold exists: the suite directory recorded in `manifest.e2e.suite`
   is non-empty and contains at least one test file.
-- [ ] Pinned tool configs exist for every tool referenced in the manifest.
+- [ ] Pinned tool configs exist for every tool referenced in the manifest — in every
+  directory the harness runs the tool from (a hook job's `root:`, a CI `working-directory`, a
+  `cd` or a runner's directory flag such as `npm --prefix app`), or in a directory above it.
 - [ ] Dependency-update config exists (`.github/dependabot.yml` or `renovate.json`)
-  and contains a cooldown block (constitution §4.6).
+  and contains a cooldown block (constitution §4.6). Profile 6: no updater key the
+  service does not support — Dependabot accepts `semver-*-days` only for ecosystems that
+  version by SemVer, rejects them under `github-actions`, `docker`, `terraform` and the
+  other default-days-only ecosystems, and rejects the WHOLE file when it sees one (checker
+  A3).
 - [ ] The ecosystem lockfile is committed (where the ecosystem supports one), and
   every install command in hooks/CI uses the frozen mode with no fresh-resolution
   fallback.
@@ -405,6 +468,16 @@ considered complete until all checks pass.
   `.github/CODEOWNERS`.
 - [ ] The whole-tree scanner exclude file exists (e.g.
   `.claudeconf/trufflehog-exclude.txt`) and covers VCS metadata + vendored trees.
+- [ ] Profile 6: the gate runs every whole-tree scanner through the vendored
+  `scan-tree.mjs -- <scanner> … {tree}`, which scans the INDEX — exactly the content the
+  next commit carries and, on a clean tree, exactly what CI checks out — never the working
+  directory, whose ignored and untracked files CI never sees. The checker holds the gate's
+  secret scan to this (A17).
+- [ ] Profile 6: `.claudeconf/bin/` is the bundle's `scripts/harness/` directory, unmodified,
+  and the manifest records its `harnessScripts.version` (checker A17). Every hook job and CI
+  step that runs a bundle script runs THAT copy, at exactly `.claudeconf/bin/<script>.mjs`: a
+  same-named script anywhere else — another directory, another extension, a nested
+  `.claudeconf/bin/` — is a copy nothing verifies, and A17 fails it.
 - [ ] `.claudeconf/suppressions.json` exists (empty array is valid) and its check
   script is wired into the gate AND CI (§4.7.2).
 - [ ] CODEOWNERS carries ownership entries for the full derived control plane —
@@ -440,6 +513,14 @@ considered complete until all checks pass.
 
 ### 3.3 Milestone wiring
 
+- [ ] Profile 6: every CI step answering a milestone or a declared project check — and
+  the job holding it — runs on EVERY pull request: no `if:` beyond `always()` /
+  `success()`, and no repository secret (`GITHUB_TOKEN` excepted). Bot and fork runs
+  receive no repository secrets, and a skipped required check reports green. Work that
+  genuinely needs a credential belongs in an ANCILLARY step, never in a required check:
+  provisioning the secret as a Dependabot secret too would still leave fork runs without it,
+  and the checker cannot see that store. Actor identity may select ancillary behaviour,
+  never whether a required check runs (checker W21).
 - [ ] Every milestone listed in `milestones` is wired into every tier in its
   `tiers` array — i.e. the hook config has a job for each `pre-commit` / `pre-push` /
   `gate` milestone, and the CI workflow has a step for each `ci` milestone. Hook wiring
@@ -742,10 +823,10 @@ operational detail alone: which tool runs, in which mode, and what it is pointed
 checks.** `claudeconf-check.mjs` ships with the plugin and runs FROM the plugin against
 a project directory — during generation, during an upgrade, and whenever the doctor
 runs. A GENERATED HARNESS NEVER INVOKES IT. Wiring it in would make the harness depend
-on this skill at execution time, which constitution §4.8 forbids outright, and would
-impose the checker's runtime on a project that may not have it — a Python-only project
-does not acquire Node to verify itself. What a generated harness runs instead is its own
-project-check assertion (§1), a separate artifact in the project's own runtime. The one
+on this skill at execution time, which constitution §4.8 forbids outright. What a
+generated harness runs instead is its own project-check assertion (§1) — at profile 6 the
+vendored bundle, a fixed copy run on the harness's own pinned Node runtime, which needs the
+plugin neither installed nor reachable. The one
 repository whose gate legitimately calls the bundled checker is claudeconf's own: there
 it is the product under test, not a dependency of the harness.
 

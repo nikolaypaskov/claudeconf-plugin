@@ -1,0 +1,92 @@
+{
+  "trufflehog": {
+    "version": "3.95.6",
+    "released": "2026-06-18",
+    "platforms": {
+      "linux-x64": {
+        "url": "https://github.com/trufflesecurity/trufflehog/releases/download/v3.95.6/trufflehog_3.95.6_linux_amd64.tar.gz",
+        "sha256": "1b62ea3cbc672ed5fd36e0eebb00b1fb50bbb7ee35090f42437a5852a299e16b",
+        "archive": "tar.gz",
+        "member": "trufflehog"
+      },
+      "linux-arm64": {
+        "url": "https://github.com/trufflesecurity/trufflehog/releases/download/v3.95.6/trufflehog_3.95.6_linux_arm64.tar.gz",
+        "sha256": "e0d8722485bf592f9ef9a72009fb5184656cfab4864fed453bbbf694d5b9350b",
+        "archive": "tar.gz",
+        "member": "trufflehog"
+      },
+      "darwin-arm64": {
+        "url": "https://github.com/trufflesecurity/trufflehog/releases/download/v3.95.6/trufflehog_3.95.6_darwin_arm64.tar.gz",
+        "sha256": "a31879b8fdf68e6f6b739bea1ae812660d43b11f4c980131ab6cb2b81aef3041",
+        "archive": "tar.gz",
+        "member": "trufflehog"
+      },
+      "darwin-x64": {
+        "url": "https://github.com/trufflesecurity/trufflehog/releases/download/v3.95.6/trufflehog_3.95.6_darwin_amd64.tar.gz",
+        "sha256": "56e1108a9f074962d85ef3e3d442d0fcac1068d038b47fee4fc8bc6a7ad82a5d",
+        "archive": "tar.gz",
+        "member": "trufflehog"
+      }
+    }
+  },
+  "actionlint": {
+    "version": "1.7.12",
+    "released": "2026-03-30",
+    "platforms": {
+      "linux-x64": {
+        "url": "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz",
+        "sha256": "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8",
+        "archive": "tar.gz",
+        "member": "actionlint"
+      },
+      "linux-arm64": {
+        "url": "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_arm64.tar.gz",
+        "sha256": "325e971b6ba9bfa504672e29be93c24981eeb1c07576d730e9f7c8805afff0c6",
+        "archive": "tar.gz",
+        "member": "actionlint"
+      },
+      "darwin-arm64": {
+        "url": "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_darwin_arm64.tar.gz",
+        "sha256": "aba9ced2dee8d27fecca3dc7feb1a7f9a52caefa1eb46f3271ea66b6e0e6953f",
+        "archive": "tar.gz",
+        "member": "actionlint"
+      },
+      "darwin-x64": {
+        "url": "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_darwin_amd64.tar.gz",
+        "sha256": "5b44c3bc2255115c9b69e30efc0fecdf498fdb63c5d58e17084fd5f16324c644",
+        "archive": "tar.gz",
+        "member": "actionlint"
+      }
+    }
+  },
+  "uv": {
+    "version": "0.12.5",
+    "released": "2026-08-14",
+    "platforms": {
+      "linux-x64": {
+        "url": "https://github.com/astral-sh/uv/releases/download/0.12.5/uv-x86_64-unknown-linux-gnu.tar.gz",
+        "sha256": "68a509da24b06b4223a1c0175fb5eb5bc79342b76cbeff0cfe51ac3f5b17b6b2",
+        "archive": "tar.gz",
+        "member": "uv-x86_64-unknown-linux-gnu/uv"
+      },
+      "linux-arm64": {
+        "url": "https://github.com/astral-sh/uv/releases/download/0.12.5/uv-aarch64-unknown-linux-gnu.tar.gz",
+        "sha256": "9bf43b4d1a07665bf64d4c4e710930b382321a785e0eb10aac07f46471f86a31",
+        "archive": "tar.gz",
+        "member": "uv-aarch64-unknown-linux-gnu/uv"
+      },
+      "darwin-arm64": {
+        "url": "https://github.com/astral-sh/uv/releases/download/0.12.5/uv-aarch64-apple-darwin.tar.gz",
+        "sha256": "5bb0e5fe008a773c3dbcb97ff79cd89e1241464fe9d2f986d52ad8f1b037bd62",
+        "archive": "tar.gz",
+        "member": "uv-aarch64-apple-darwin/uv"
+      },
+      "darwin-x64": {
+        "url": "https://github.com/astral-sh/uv/releases/download/0.12.5/uv-x86_64-apple-darwin.tar.gz",
+        "sha256": "b3b2137477cf96c9686ebfb71524614cec780c673fd73e59bce099aef02e70e8",
+        "archive": "tar.gz",
+        "member": "uv-x86_64-apple-darwin/uv"
+      }
+    }
+  }
+}

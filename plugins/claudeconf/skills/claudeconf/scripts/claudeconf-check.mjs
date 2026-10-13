@@ -28,25 +28,47 @@ import { execFileSync } from 'node:child_process';
 import {
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
-  readFileSync,
   realpathSync,
   rmSync,
   statSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, posix, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { compareToEntry, hashTree } from './harness/lib/catalog.mjs';
+import { compareVersions, resolvePin } from './harness/lib/pins.mjs';
+import {
+  analyseCommand,
+  classifyWork,
+  commandInvokesTool,
+  commandMatchesTool,
+  continueOnErrorVerdict,
+  escapeRx,
+  executableText,
+  firstLine,
+  liveScriptLines,
+  norm,
+  operationalArgs,
+  runContains,
+  safeRead,
+  signalVerdict,
+  splitTopLevel,
+  stripComment,
+  tokenize,
+} from './harness/lib/shell.mjs';
+import { pinnedConfigFor, TOOL_CONFIGS } from './harness/lib/tool-configs.mjs';
 import { load as yamlLoad } from './vendor/js-yaml.mjs';
 
 // ---------------------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------------------
 
-const KNOWN_PROFILES = ['2', '3', '4', '5'];
-const CURRENT_PROFILE = 5;
+export const KNOWN_PROFILES = ['2', '3', '4', '5', '6'];
+export const CURRENT_PROFILE = 6;
 
 const MILESTONES = [
   'format',
@@ -106,8 +128,13 @@ function managedNamesFor(token) {
   return MILESTONE_JOB_NAMES[norm(token)] ?? [token];
 }
 
-/** Tools whose version comes from the runtime, so `"n/a"` is a legitimate pin (contract §2.3). */
+/**
+ * Tools whose version comes from the runtime, so `"n/a"` is a legitimate pin (contract §2.3).
+ * `node` is a repository script the runtime executes: the script is versioned by the
+ * repository itself and the interpreter by the runtime pin, so there is no third version.
+ */
 const RUNTIME_VERSIONED = [
+  'node',
   'npm-audit',
   'pip-audit',
   'cargo-audit',
@@ -146,6 +173,7 @@ export const CHECK_ORDER = [
   'M10',
   'M11',
   'M12',
+  'M13',
   'A1',
   'A2',
   'A3',
@@ -160,6 +188,7 @@ export const CHECK_ORDER = [
   'A12',
   'A13',
   'A16',
+  'A17',
   'A14',
   'A15',
   'W1',
@@ -182,6 +211,7 @@ export const CHECK_ORDER = [
   'W18',
   'W19',
   'W20',
+  'W21',
   'D1',
   'D2',
   'D3',
@@ -213,6 +243,7 @@ export const GROUP_IDS = {
     ['M10', 1],
     ['M11', 1],
     ['M12', 4],
+    ['M13', 6],
   ],
   'A*': [
     ['A1', 1],
@@ -229,6 +260,7 @@ export const GROUP_IDS = {
     ['A12', 1],
     ['A13', 4],
     ['A16', 5],
+    ['A17', 6],
   ],
   'A14/A15': [
     ['A14', 4],
@@ -255,6 +287,7 @@ export const GROUP_IDS = {
     ['W18', 1],
     ['W19', 4],
     ['W20', 1],
+    ['W21', 6],
   ],
   'D*': [
     ['D1', 1],
@@ -268,6 +301,185 @@ export const GROUP_IDS = {
     ['D9', 5],
   ],
 };
+
+/**
+ * SINCE — the conformance profile whose normative text introduced the rule each check enforces
+ * (PLAN.md AD6). A CLOSED registry: every id in CHECK_ORDER has an entry, and a finding may
+ * name a subrule (a dotted key such as A3.keys) only if that key is registered here — `judgeFinding`
+ * refuses anything else, so no call site can invent its own leniency. A finding whose rule is
+ * newer than the profile the harness is judged at reports INFO instead of FAIL/UNKNOWN, unless
+ * it is CRITICAL or a hard UNKNOWN; CRITICAL checks gate their newer rules explicitly in code.
+ * Values: the per-id audit against the constitution/contract of each released profile (v0.2.0
+ * ff19ff4 … v0.5.0 c19fb0f), recorded in PLAN.md's appendix. `CRITICAL_UNKNOWN` is the profile
+ * at which a CRITICAL UNKNOWN became a FAIL under --enforce (contract §3.6).
+ */
+export const SINCE = {
+  M1: 2,
+  M2: 2,
+  M3: 2,
+  M4: 2,
+  M5: 2,
+  M6: 2,
+  M7: 2,
+  M8: 3,
+  M9: 4,
+  M10: 2,
+  M11: 2,
+  M12: 4,
+  M13: 6,
+  'M4.pin': 6,
+  'M7.pin': 6,
+  'M8.pin': 6,
+  'A13.floor': 6,
+  A1: 2,
+  A2: 2,
+  A3: 2,
+  'A3.keys': 6,
+  A4: 2,
+  A5: 2,
+  A6: 2,
+  A7: 2,
+  A8: 2,
+  A9: 3,
+  'A9.path': 6,
+  A10: 3,
+  A11: 4,
+  A12: 2,
+  A13: 4,
+  A16: 5,
+  A17: 6,
+  'A17.callers': 6,
+  A14: 4,
+  A15: 4,
+  W1: 2,
+  'W1.naming': 4,
+  'W1.inert': 4,
+  W2: 2,
+  'W2.region': 4,
+  'W2.reach': 4,
+  W3: 2,
+  'W3.naming': 4,
+  W4: 2,
+  'W4.naming': 4,
+  'W4.reach': 4,
+  W5: 2,
+  'W5.naming': 4,
+  'W5.inert': 4,
+  'W5.reach': 4,
+  W6: 2,
+  'W6.dockerRun': 4,
+  W7: 2,
+  'W7.header': 4,
+  W8: 3,
+  W9: 2,
+  'W9.region': 4,
+  'W9.reach': 4,
+  W10: 3,
+  'W10.naming': 4,
+  'W10.inert': 4,
+  'W10.region': 4,
+  'W10.reach': 4,
+  W11: 4,
+  'W11.naming': 4,
+  'W11.inert': 4,
+  'W11.reach': 4,
+  'W11.region': 4,
+  W12: 4,
+  W13: 2,
+  'W13.ci': 4,
+  W14: 2,
+  'W14.pipHashes': 4,
+  W15: 4,
+  W16: 2,
+  'W16.narrowing': 4,
+  W17: 4,
+  W18: 4,
+  W19: 4,
+  W20: 2,
+  W21: 6,
+  D1: 2,
+  'D1.unreconciled': 4,
+  D2: 2,
+  'D2.path': 6,
+  D3: 2,
+  D4: 2,
+  D5: 2,
+  D6: 4,
+  D7: 3,
+  'D7.catchAll': 4,
+  D8: 4,
+  D9: 5,
+  P1: 2,
+  CRITICAL_UNKNOWN: 4,
+};
+
+/**
+ * The profile a harness is JUDGED at (PLAN.md AD6). Pure.
+ *
+ * J = max(recorded, --profile target, the highest profile the manifest's git history records).
+ * History is what makes the record trustworthy: lowering the field cannot lower J, because the
+ * old value is still in history. Without history (no git, `--no-git`, a shallow clone) the
+ * record cannot be trusted at all, so J is the CURRENT profile — fail closed, as for a missing,
+ * unparseable or future value. Profile 1 is a real profile this checker never knew: it is an
+ * explicit unsupported mode rather than a number to compare against.
+ *
+ * @param {{recorded: string|null, target: number|null,
+ *   history: {available: boolean, max: number|null, why?: string}}} input
+ * @returns {{profile: number, unsupported: boolean, notes: string[]}}
+ */
+export function judgmentProfile({ recorded, target, history }) {
+  const notes = [];
+  if (!history.available) {
+    notes.push(
+      `the manifest's git history is unavailable (${history.why}), so the recorded profile cannot be trusted — judged at the current profile ${CURRENT_PROFILE}; run with full history to be judged at the recorded one`,
+    );
+    return { profile: CURRENT_PROFILE, unsupported: false, notes };
+  }
+  let base = CURRENT_PROFILE;
+  if (recorded === '1') base = 1;
+  else if (recorded && KNOWN_PROFILES.includes(recorded)) base = Number(recorded);
+  const historical = history.max ?? 0;
+  const profile = Math.min(CURRENT_PROFILE, Math.max(base, historical, target ?? 0));
+  if (historical > base) {
+    notes.push(
+      `the manifest records ${JSON.stringify(recorded)} but its history records ${historical} — judged at ${profile}: a recorded profile can be raised, never lowered`,
+    );
+  }
+  return { profile, unsupported: profile === 1, notes };
+}
+
+/**
+ * Applies a judgment to ONE finding. Pure. Returns `null` when the finding stands, or the
+ * replacement `{ status, prefix }`.
+ *
+ * @param {{id: string, rule?: string, status: string, hard?: boolean, integrity?: boolean}} finding
+ * @param {{profile: number, unsupported: boolean}} judgment
+ * @param {{since?: Record<string, number>, critical?: Set<string>}} [tables] test seam
+ */
+export function judgeFinding(finding, judgment, tables = {}) {
+  const since = tables.since ?? SINCE;
+  const critical = tables.critical ?? CRITICAL;
+  const key = finding.rule ?? finding.id;
+  if (!Object.hasOwn(since, key)) throw new Error(`rule ${key} is not registered in SINCE`);
+  if (finding.status !== 'FAIL' && finding.status !== 'UNKNOWN') return null;
+  // The checker vouching for its OWN integrity (a crash, an internal error, the judgment's own
+  // sentinel) is never demoted, by anything.
+  if (finding.integrity) return null;
+  if (judgment.unsupported) {
+    return { status: 'INFO', prefix: 'not judged (profile 1 is not supported by this checker): ' };
+  }
+  if (finding.hard) return null;
+  // A CRITICAL id is never demoted by its id alone: only a finding its emitter TAGGED with a
+  // registered rule key (`rule:`) can be — the call site states which newer rule produced it.
+  if (critical.has(finding.id) && finding.rule === undefined) return null;
+  if (since[key] > judgment.profile) {
+    return {
+      status: 'INFO',
+      prefix: `newer rule (profile ${since[key]}; judged at ${judgment.profile}): `,
+    };
+  }
+  return null;
+}
 
 const OPEN_SENTINEL = '>>> claudeconf managed >>>';
 const CLOSE_SENTINEL = '<<< claudeconf managed <<<';
@@ -612,14 +824,6 @@ function expandGlob(root, pattern) {
 // Small utilities
 // ---------------------------------------------------------------------------------------
 
-function safeRead(path) {
-  try {
-    return { text: readFileSync(path, 'utf8'), error: null };
-  } catch (e) {
-    return { text: null, error: e.message };
-  }
-}
-
 function parseYaml(text) {
   try {
     return { doc: yamlLoad(text), error: null };
@@ -644,89 +848,51 @@ function runCommand(cmd, args, cwd) {
 function isGitToplevel(root) {
   const out = runCommand('git', ['rev-parse', '--show-toplevel'], root);
   if (out.error) return false;
+  // git reports the REAL path, so compare real paths: a root reached through a symlink (a
+  // macOS temp dir, a symlinked home) is still the top level it resolves to.
   try {
-    return resolve(out.stdout.trim()) === resolve(root);
+    return realpathSync(out.stdout.trim()) === realpathSync(resolve(root));
   } catch {
     return false;
   }
 }
 
-/** Normalises a name for tolerant comparison: lowercase, alphanumerics only. */
-function norm(s) {
-  return String(s ?? '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, '');
-}
-
-/** Strips a trailing ` # comment` that is not inside quotes. */
-function stripComment(cmd) {
-  const s = String(cmd ?? '');
-  let quote = null;
-  for (let i = 0; i < s.length; i++) {
-    const c = s[i];
-    if (quote) {
-      if (c === quote) quote = null;
-    } else if (c === '"' || c === "'") {
-      quote = c;
-    } else if (c === '#' && (i === 0 || /\s/.test(s[i - 1]))) {
-      return s.slice(0, i).trimEnd();
-    }
-  }
-  return s;
-}
-
 /**
- * A command's EXECUTABLE text: every line stripped of its shell comment.
- *
- * This is the ONE way command text is prepared for matching anywhere in this file. Matching a
- * raw `run:` block lets a comment answer for the command — `# runs tsc under the hood` beside
- * `true` reads as a typecheck — and that is a class of bug, not a site: every tool-token
- * search, every fetch/install/package-runner scan, and the command analyser all route here.
- * The single deliberate exception is D5, which reconciles VERSION CLAIMS and therefore MUST
- * read comments (a stale `# 1.27.0` beside a digest is exactly the drift it exists to catch).
+ * The highest conformance profile `.claudeconf/manifest.json` has EVER recorded, read from git
+ * history (PLAN.md AD6): one `git log -p` over the manifest, every `constitutionVersion` value on
+ * an added or removed line. Values outside the profiles this checker can name are ignored.
+ * `available: false` whenever the history cannot be trusted to be complete — the caller then
+ * refuses to trust the record at all.
  */
-function executableText(command) {
-  return String(command ?? '')
-    .split('\n')
-    .map(stripComment)
-    .join('\n');
-}
-
-/** Splits a shell command into whitespace-delimited tokens, honouring simple quoting. */
-function tokenize(cmd) {
-  const tokens = [];
-  let current = '';
-  let quote = null;
-  for (const c of String(cmd ?? '')) {
-    if (quote) {
-      if (c === quote) quote = null;
-      else current += c;
-    } else if (c === '"' || c === "'") {
-      quote = c;
-    } else if (/\s/.test(c)) {
-      if (current) tokens.push(current);
-      current = '';
-    } else {
-      current += c;
-    }
+function manifestHistory(root, noGit) {
+  const none = (why) => ({ available: false, max: null, why });
+  if (noGit) return none('--no-git');
+  const inside = runCommand('git', ['rev-parse', '--is-inside-work-tree'], root);
+  if (inside.error || inside.stdout.trim() !== 'true') return none('not a git work tree');
+  const shallow = runCommand('git', ['rev-parse', '--is-shallow-repository'], root);
+  if (shallow.error) return none(`shallow state unknown: ${shallow.error}`);
+  if (shallow.stdout.trim() === 'true') return none('shallow clone');
+  const log = runCommand(
+    'git',
+    [
+      'log',
+      '--format=',
+      '-p',
+      '--unified=0',
+      '--no-color',
+      '--no-ext-diff',
+      '--',
+      '.claudeconf/manifest.json',
+    ],
+    root,
+  );
+  if (log.error) return none(`git log failed: ${log.error}`);
+  let max = null;
+  for (const m of log.stdout.matchAll(/^[+-].*"constitutionVersion"\s*:\s*"([^"]*)"/gm)) {
+    const v = m[1];
+    if (v === '1' || KNOWN_PROFILES.includes(v)) max = Math.max(max ?? 0, Number(v));
   }
-  if (current) tokens.push(current);
-  return tokens;
-}
-
-/** The command's leading segment, with any `&&`/`||`/`;` continuation removed. */
-function primarySegment(cmd) {
-  const line =
-    executableText(cmd)
-      .split('\n')
-      .map((l) => l.trim())
-      .find(Boolean) ?? '';
-  const segments = line.split(/\s*(?:&&|\|\||;)\s*/).filter((seg) => seg.trim());
-  return segments[0] ?? '';
-}
-
-function firstLine(s) {
-  return String(s ?? '').split('\n')[0];
+  return { available: true, max };
 }
 
 function uniq(list) {
@@ -737,10 +903,6 @@ function isInside(root, path) {
   const r = resolve(path);
   const base = resolve(root);
   return r === base || r.startsWith(base + sep);
-}
-
-function escapeRx(s) {
-  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /** 1-based line number of the first line satisfying `test`, searching from `from` (1-based). */
@@ -762,6 +924,8 @@ export class Report {
     this.applicable = new Set();
     this.emittedBy = new Map();
     this.group = null;
+    /** Set before any check runs (PLAN.md AD6); `null` judges nothing. */
+    this.judgment = null;
   }
 
   /** Marks a check as applicable at this profile even before it has findings. */
@@ -791,7 +955,7 @@ export class Report {
     // hardcoded id in the crash handler, a verdict absent from SEVERITY), so it is closed here
     // — at the one door every finding goes through — rather than at each call site.
     const known = Object.hasOwn(SEVERITY, status);
-    this.findings.get(id).push({
+    const entry = {
       status: known ? status : 'UNKNOWN',
       evidence: known
         ? evidence
@@ -799,8 +963,39 @@ export class Report {
       file: opts.file,
       line: opts.line,
       hard: known ? !!opts.hard : true,
+      // An out-of-domain status is the checker contradicting itself: an integrity finding.
+      integrity: known ? !!opts.integrity : true,
       acknowledged: !!opts.acknowledged,
-    });
+    };
+    // The judgment (PLAN.md AD6) is applied HERE, at the one door every finding goes through,
+    // and only from the closed SINCE registry — an unregistered subrule is an internal error,
+    // never a quiet pass.
+    try {
+      const verdict = this.judgment
+        ? judgeFinding(
+            {
+              id,
+              rule: opts.rule,
+              status: entry.status,
+              hard: entry.hard,
+              integrity: entry.integrity,
+            },
+            this.judgment,
+          )
+        : opts.rule && !Object.hasOwn(SINCE, opts.rule)
+          ? judgeFinding({ id, rule: opts.rule, status: 'PASS' }, { profile: 0 })
+          : null;
+      if (verdict) {
+        entry.evidence = `${verdict.prefix}${entry.evidence}`;
+        entry.status = verdict.status;
+      }
+    } catch (e) {
+      entry.status = 'UNKNOWN';
+      entry.hard = true;
+      entry.integrity = true;
+      entry.evidence = `internal: ${e.message} — ${entry.evidence}`;
+    }
+    this.findings.get(id).push(entry);
   }
 
   /**
@@ -835,14 +1030,27 @@ export class Report {
         if (SEVERITY[item.status] > SEVERITY[worst.status]) worst = item;
       }
       let status = worst.status;
+      // Worst first (a stable sort, on the copy `filter` returns — no `toSorted`, which a
+      // consumer's older Node lacks): the row's status comes from its worst finding, so its
+      // evidence leads with that one — a demoted note such as a newer rule's INFO must never
+      // read as the reason a row FAILed.
       let evidence = items
         .filter((i) => SEVERITY[i.status] === SEVERITY[worst.status] || items.length <= 4)
+        .sort((a, b) => SEVERITY[b.status] - SEVERITY[a.status])
         .map((i) => i.evidence)
         .join(' | ');
+      // "A CRITICAL UNKNOWN is a FAIL under --enforce" is itself a profile-4 rule (contract
+      // §3.6, constitution §4.8): a harness judged below it keeps UNKNOWN as UNKNOWN. A hard
+      // UNKNOWN escalates at every profile — it is the checker's own structural claim.
+      const criticalEscalates =
+        !this.judgment ||
+        this.judgment.unsupported ||
+        this.judgment.profile >= SINCE.CRITICAL_UNKNOWN;
       if (
         status === 'UNKNOWN' &&
         this.mode === 'enforce' &&
-        (CRITICAL.has(id) || items.some((i) => i.status === 'UNKNOWN' && i.hard))
+        ((criticalEscalates && CRITICAL.has(id)) ||
+          items.some((i) => i.status === 'UNKNOWN' && i.hard))
       ) {
         status = 'FAIL';
         evidence = `unverifiable under --enforce: ${evidence}`;
@@ -866,6 +1074,8 @@ export class Report {
 function loadContext(opts) {
   const root = resolve(opts.root);
   const ctx = { root, opts, manifest: null, manifestError: null, pkg: null };
+  // The shared shell reader asks the caller which pinned config drives a tool (shell.mjs).
+  ctx.workOptions = (analysis, tool) => workOptionsFor(ctx, analysis, tool);
 
   const manifestRead = safeRead(join(root, '.claudeconf/manifest.json'));
   if (manifestRead.text === null) {
@@ -958,214 +1168,6 @@ function projectChecksOf(manifest) {
   return manifest && Array.isArray(manifest.projectChecks) ? manifest.projectChecks : null;
 }
 
-// ---------------------------------------------------------------------------------------
-// Command analysis — which TOOL does a command invoke, and does it do work?
-// ---------------------------------------------------------------------------------------
-
-const SCRIPT_RUNNERS = new Set(['npm', 'pnpm', 'yarn', 'bun']);
-/**
- * Runners whose first argument NAMES A TASK rather than a target (contract §3.3). `npm test`,
- * `make lint` and `cargo test` all carry their operation in the task definition, so they are not
- * bare invocations — three of the four shipped fixtures failed their own arbiter's default run
- * because this rule read them as "no operational argument".
- */
-const TASK_RUNNERS = new Set([
-  'npm',
-  'pnpm',
-  'yarn',
-  'bun',
-  'make',
-  'cargo',
-  'go',
-  'mix',
-  'rake',
-  'just',
-  'task',
-  'gradle',
-  'mvn',
-  'dotnet',
-  'poetry',
-  'uv',
-  'tox',
-  'nox',
-  'hatch',
-  'pdm',
-  'composer',
-  'swift',
-]);
-/**
- * Wrappers that run another command and report ITS status. `xargs <tool>` is the shape that
- * matters: the reader saw `xargs` as the tool, lost the identity, and then classified the whole
- * pipeline by its head (`echo`) as a no-op — a FAIL on a command the runner exits 1 on.
- */
-const PREFIX_DROP = new Set([
-  'sudo',
-  'command',
-  'env',
-  'time',
-  'exec',
-  '!',
-  'xargs',
-  'nice',
-  'nohup',
-  'stdbuf',
-]);
-
-/**
- * Reduces a command to `{ tool, candidates, args }`: strips env assignments and wrapper
- * prefixes, resolves `npm run <script>` through package.json, unwraps `python -m <mod>`, and
- * reduces a path to its basename.
- */
-function analyseCommand(cmd, pkg, depth = 0) {
-  const segment = primarySegment(cmd);
-  let tokens = tokenize(segment);
-  while (tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[0])) tokens = tokens.slice(1);
-  while (tokens.length && PREFIX_DROP.has(tokens[0])) tokens = tokens.slice(1);
-  // On-demand package runners are their own finding (W13/W15); for tool identity, unwrap them.
-  if (tokens[0] === 'npx' || tokens[0] === 'uvx' || tokens[0] === 'pipx') {
-    tokens = tokens.slice(1);
-    if (tokens[0] === 'run') tokens = tokens.slice(1);
-    while (tokens.length && tokens[0].startsWith('-')) tokens = tokens.slice(1);
-  } else if ((tokens[0] === 'uv' || tokens[0] === 'poetry') && tokens[1] === 'run') {
-    tokens = tokens.slice(2);
-  } else if (tokens[0] === 'npm' && tokens[1] === 'exec') {
-    tokens = tokens.slice(2);
-    while (tokens.length && (tokens[0].startsWith('-') || tokens[0] === '--')) {
-      tokens = tokens.slice(1);
-    }
-  }
-  if (!tokens.length) return { tool: '', candidates: [], args: [], raw: segment };
-
-  let head = tokens[0];
-  let args = tokens.slice(1);
-
-  // `npm run <script>` / `npm test` — resolve through package.json scripts.
-  if (SCRIPT_RUNNERS.has(head) && pkg?.scripts && depth < 3) {
-    let script = null;
-    if (args[0] === 'run' || args[0] === 'run-script') script = args[1];
-    else if (args[0] && !args[0].startsWith('-') && pkg.scripts[args[0]]) script = args[0];
-    if (script && typeof pkg.scripts[script] === 'string') {
-      const inner = analyseCommand(pkg.scripts[script], pkg, depth + 1);
-      if (inner.tool)
-        return { ...inner, raw: segment, resolvedFrom: script, task: `the script \`${script}\`` };
-    }
-  }
-
-  if (head.includes('/')) head = basename(head);
-
-  let viaTask = null;
-  if (/^python[0-9.]*$/.test(head) && args[0] === '-m' && args[1]) {
-    viaTask = `the module \`${args[1]}\``;
-    head = args[1];
-    args = args.slice(2);
-  }
-  if (TASK_RUNNERS.has(head) && args[0] && !args[0].startsWith('-')) {
-    viaTask = `the task \`${args[0]}\``;
-  }
-
-  const candidates = [norm(head)];
-  const task = viaTask;
-  if (args[0]) candidates.push(norm(head + args[0]));
-  if (args[1]) candidates.push(norm(head + args[0] + args[1]));
-  return { tool: head, candidates, args, raw: segment, task };
-}
-
-/**
- * The commands an indirection actually runs, when its definition lives in this repository.
- *
- * Closing `xargs`, `cd &&` and `time` one at a time was the shape-by-shape mistake; the class is
- * "the command names something whose body is in the tree". That is: an npm/pnpm/yarn script
- * (resolved in `analyseCommand`), a project script file, and a `make` target. Following them
- * keeps the indirection from being either a blind spot for identity or a hiding place for a
- * swallow — a `Makefile` target of `true` fails exactly as a bare `true` does.
- */
-function resolveIndirection(ctx, command) {
-  const analysis = analyseCommand(command, ctx.pkg);
-  if (analysis.resolvedFrom) return null; // already resolved by the script resolver
-  const tokens = tokenize(primarySegment(command));
-  const head = tokens[0] ?? '';
-  if (head === 'make' && tokens[1] && !tokens[1].startsWith('-')) {
-    for (const name of ['Makefile', 'makefile', 'GNUmakefile']) {
-      const read = safeRead(join(ctx.root, name));
-      if (read.text === null) continue;
-      const rx = new RegExp(`^${escapeRx(tokens[1])}\\s*:[^=\\n]*\\n((?:\\t[^\\n]*\\n?)+)`, 'm');
-      const found = rx.exec(read.text);
-      if (found) {
-        return {
-          source: `${name} target \`${tokens[1]}\``,
-          commands: found[1]
-            .split('\n')
-            .map((l) => l.replace(/^\t[-@+]*/, '').trim())
-            .filter(Boolean),
-        };
-      }
-    }
-    return null;
-  }
-  if (/^[.\w][\w./-]*\.(sh|bash|mjs|js|cjs|py)$/.test(head) || head.startsWith('./')) {
-    const rel = head.replace(/^\.\//, '');
-    const read = safeRead(join(ctx.root, rel));
-    if (read.text === null) return null;
-    if (/\.(mjs|js|cjs|py)$/.test(rel)) return null; // not a shell script; its body is not shell
-    // The FULL text, not the live-line view: propagation needs the control flow an early
-    // `exit 1` lives in, and the pin scanner's view deliberately drops exactly that.
-    return { source: rel, commands: [read.text] };
-  }
-  return null;
-}
-
-/** Matches a manifest tool name against a command's candidate tokens. */
-function commandMatchesTool(analysis, tool) {
-  return analysis.candidates.includes(norm(tool));
-}
-
-/** The arguments left after the matched tool's own tokens. */
-function operationalArgs(analysis, tool) {
-  const index = analysis.candidates.indexOf(norm(tool));
-  if (index <= 0) return analysis.args;
-  return analysis.args.slice(index);
-}
-
-const NO_OP_HEADS = new Set(['true', ':', 'echo', 'printf', 'exit']);
-const PROBE_FLAGS = new Set(['--version', '-V', '--help', '-h', 'version', '--usage']);
-
-/**
- * Classifies a command's usefulness (spec §5 R-C3): FAIL for a no-op or a pure version/help
- * probe, PASS when it carries an operational argument, UNKNOWN otherwise.
- */
-
-/**
- * Classifies a command's usefulness (spec §5 R-C3 + controller ruling): FAIL for a no-op or
- * for a command carrying a version/help probe flag AT ALL (a config cannot launder
- * `--version`); PASS when it carries an operational argument OR when the tool's PINNED CONFIG
- * carries the operation (`tsup`, `mypy`, `vitest` are config-driven by design and A12 has
- * already verified that config exists); UNKNOWN otherwise.
- */
-function classifyWork(analysis, args, opts = {}) {
-  if (!analysis.tool) return { status: 'FAIL', why: 'empty command' };
-  if (NO_OP_HEADS.has(analysis.tool)) {
-    return { status: 'FAIL', why: `no-op command \`${analysis.raw}\`` };
-  }
-  if (args.some((a) => PROBE_FLAGS.has(a))) {
-    return { status: 'FAIL', why: `version/help probe \`${analysis.raw}\` demonstrates nothing` };
-  }
-  if (args.length) return { status: 'PASS', why: analysis.raw };
-  if (opts.configFile) {
-    return { status: 'PASS', why: `\`${analysis.raw}\` is config-driven by ${opts.configFile}` };
-  }
-  // A command may name a TARGET or a TASK. The operation lives in the task definition, which is
-  // resolved and judged where it can be (an npm script of `true` fails exactly as a bare `true`
-  // would, via the resolution in `analyseCommand`) and accepted where it cannot — indirection is
-  // not a defect. Only a command naming neither is unverifiable.
-  if (analysis.task) {
-    return { status: 'PASS', why: `\`${analysis.raw}\` names ${analysis.task}` };
-  }
-  return {
-    status: 'UNKNOWN',
-    why: `\`${analysis.raw}\` names neither a target nor a task, so what it operates on cannot be established`,
-  };
-}
-
 /**
  * Modes read from the CONSTITUTION THE PLUGIN SHIPS: §1's tier ladder and §2's milestone
  * gates each carry a mode column, and both exemptions are read from them.
@@ -1217,990 +1219,6 @@ function constitutionModes(section) {
 const milestoneModes = () => constitutionModes('2. Milestone Gates');
 const tierModes = () => constitutionModes('1. Tier Ladder');
 
-/** Splits a command on a top-level separator, honouring quotes. */
-function splitTopLevel(command, separator) {
-  const out = [];
-  let current = '';
-  let quote = null;
-  // A separator inside a `( … )` subshell or a `{ … }` group is not top level: splitting there
-  // tore `cmd || { echo failed; exit 1; }` into fragments whose `}` then read as unbalanced.
-  // Depth never goes negative, so a stray `)` (as in a `case` pattern) cannot hide a separator.
-  let depth = 0;
-  const text = String(command ?? '');
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (quote) {
-      if (quote === '"' && c === '\\') {
-        current += c + (text[++i] ?? '');
-        continue;
-      }
-      if (c === quote) quote = null;
-      current += c;
-      continue;
-    }
-    if (c === '"' || c === "'") {
-      quote = c;
-      current += c;
-      continue;
-    }
-    if (c === '(' || c === '{') depth++;
-    else if (c === ')' || c === '}') depth = Math.max(0, depth - 1);
-    if (depth === 0 && text.startsWith(separator, i)) {
-      out.push(current);
-      current = '';
-      i += separator.length - 1;
-      continue;
-    }
-    current += c;
-  }
-  out.push(current);
-  return out.filter((part) => part.trim());
-}
-
-/**
- * W20 — can this command still turn a tier RED?
- *
- * A shell script's exit status is the status of its LAST statement, so that is what decides:
- * the last executable line, its last `;`-separated statement, and that statement's last `||`
- * alternative. The alternative is judged by the SAME classifier W17 uses (a second classifier
- * would drift from the first), so `|| true`, `|| :`, `|| echo skipped` and a trailing
- * `; exit 0` all read as a forced success. `|| exit 1` is not: it fails loudly on purpose.
- */
-
-/**
- * ---------------------------------------------------------------------------------------
- * Shell propagation analysis (contract §3.3, W20)
- * ---------------------------------------------------------------------------------------
- *
- * The question is POSITIVE: is there a demonstrable path by which the invoked tool's non-zero
- * exit becomes the whole command's non-zero exit? It is NOT "does this command match a known
- * way of discarding a status" — that list was written twice and was one shape short both times.
- *
- * Two rules govern the answer, and both are the contract's:
- *
- *   Unresolvability is a FLOOR, never a ceiling. The strongest DEMONSTRATED verdict wins; a
- *   command that demonstrably discards its status does not become unresolved because it also
- *   contains a construct this reader cannot parse. Otherwise one `$( )` beside a swallow
- *   launders a FAIL and the safety valve becomes the bypass.
- *
- *   Getting it wrong in the strict direction is not "safe". It rejects a working harness and
- *   sends its owner looking for a suppression, so every idiom a real harness uses —
- *   `set -euo pipefail` then a guard block, `exit $?`, `cd dir && tool`, `cmd | xargs tool`,
- *   `time tool` — has to be READ rather than refused.
- */
-
-/** Thrown internally when the reader will not guess; callers turn it into UNRESOLVED. */
-class Unresolved extends Error {}
-
-const BLOCK_OPENERS = new Set(['if', 'while', 'until', 'for']);
-const BLOCK_KEYWORDS = new Set([
-  'if',
-  'elif',
-  'else',
-  'then',
-  'fi',
-  'while',
-  'until',
-  'for',
-  'do',
-  'done',
-  'case',
-  'esac',
-  'select',
-  'function',
-  'coproc',
-  '{',
-  '}',
-]);
-
-/**
- * Constructs whose STRUCTURE this reader will not interpret. They are collapsed into one opaque
- * STATEMENT rather than making the whole command unreadable: a construct it cannot read still
- * occupies a position, and position is most of what propagation is about. Refusing the command
- * instead is what let one `case` — or one unbalanced `function` — launder a swallow three lines
- * away from it.
- */
-const OPAQUE_BLOCKS = [
-  { open: /^case\b/, close: /^esac\b/, why: 'a `case` statement' },
-  { open: /^select\b/, close: /^done\b/, why: 'a `select` loop' },
-  { open: /^coproc\b/, close: /^\}$/, why: 'a `coproc`' },
-  { open: /^function\b/, close: /^\}$/, why: 'a function definition' },
-  { open: /^[A-Za-z_][A-Za-z0-9_]*\s*\(\s*\)\s*\{?/, close: /^\}$/, why: 'a function definition' },
-];
-
-/** The first word of a statement, lowercased — its keyword when it has one. */
-function leadingKeyword(text) {
-  const trimmed = String(text).trim();
-  if (trimmed === '{' || trimmed === '}') return trimmed;
-  const word = trimmed.split(/\s+/)[0] ?? '';
-  return BLOCK_KEYWORDS.has(word) ? word : '';
-}
-
-/**
- * Joins backslash line continuations. A wrapped tool invocation is the commonest reason a
- * `run:` is multi-line at all, and splitting on the newline made the argument line "decide the
- * exit status" — a hard FAIL, at every profile, on a command the runner exits 1 on.
- */
-function joinContinuations(text) {
-  return String(text ?? '').replace(/\\\n\s*/g, ' ');
-}
-
-/**
- * Masks `$( … )` and backquoted substitutions with an opaque VALUE token. A substitution is an
- * expression inside a statement, never structure, so masking it keeps the command's shape
- * readable while admitting that the value is unknown. Treating it as unreadable STRUCTURE is
- * what made one `$(date)` launder a demonstrated swallow.
- */
-function maskSubstitutions(text) {
-  let out = '';
-  const src = String(text ?? '');
-  for (let i = 0; i < src.length; i++) {
-    if (src[i] === '`') {
-      const end = src.indexOf('`', i + 1);
-      out += '__SUBST__';
-      i = end === -1 ? src.length : end;
-      continue;
-    }
-    if (src[i] === '$' && src[i + 1] === '(') {
-      let depth = 0;
-      let j = i + 1;
-      for (; j < src.length; j++) {
-        if (src[j] === '(') depth++;
-        else if (src[j] === ')') {
-          depth--;
-          if (depth === 0) break;
-        }
-      }
-      out += '__SUBST__';
-      i = j;
-      continue;
-    }
-    out += src[i];
-  }
-  return out;
-}
-
-/**
- * Removes here-document BODIES, which are data rather than statements. An UNTERMINATED here-doc
- * swallows the rest of the text, so everything from it onward becomes one opaque statement
- * rather than an unreadable command.
- */
-function stripHeredocs(text) {
-  const lines = String(text ?? '').split('\n');
-  const out = [];
-  let delimiter = null;
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (delimiter !== null) {
-      if (line.trim() === delimiter) delimiter = null;
-      continue;
-    }
-    const open = /<<-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1/.exec(line);
-    if (open) {
-      delimiter = open[2];
-      out.push(line.replace(/<<-?\s*(['"]?)[A-Za-z_][A-Za-z0-9_]*\1/, '').trimEnd());
-      continue;
-    }
-    out.push(line);
-  }
-  if (delimiter !== null) {
-    return { text: out.join('\n'), unterminated: 'an unterminated here-document' };
-  }
-  return { text: out.join('\n'), unterminated: null };
-}
-
-/**
- * Splits on a top-level `&` used as a STATEMENT SEPARATOR — never on `&&`, `|&`, `2>&1` or `&>`.
- */
-function splitBackgrounded(text) {
-  const masked = stripQuotedRegions(String(text));
-  const out = [];
-  let start = 0;
-  for (let i = 0; i < masked.length; i++) {
-    if (masked[i] !== '&') continue;
-    if (masked[i + 1] === '&' || masked[i - 1] === '&') {
-      i++;
-      continue;
-    }
-    if (masked[i - 1] === '>' || masked[i - 1] === '<' || masked[i + 1] === '>') continue;
-    if (masked[i - 1] === '|') continue; // `|&` is a pipeline operator, not backgrounding
-    out.push({ text: text.slice(start, i).trim(), backgrounded: true });
-    start = i + 1;
-  }
-  const rest = text.slice(start).trim();
-  if (rest) out.push({ text: rest, backgrounded: false });
-  return out.filter((part) => part.text);
-}
-
-/**
- * Splits a command into fragments — newline, `;` and `&` separated — and strips a leading
- * `then`/`do`/`else` off each, so `do if [ -f x ]` is recognised as the block opener it is.
- * A `{` or `}` that opens or closes a multi-line group becomes its own fragment.
- */
-function fragmentsOf(text) {
-  const out = [];
-  const push = (raw, backgrounded) => {
-    let value = raw.trim();
-    if (!value) return;
-    let keyword = leadingKeyword(value);
-    while (keyword === 'then' || keyword === 'do' || keyword === 'else') {
-      const rest = value.slice(keyword.length).trim();
-      out.push({ text: keyword, keyword, backgrounded: false });
-      if (!rest) return;
-      value = rest;
-      keyword = leadingKeyword(value);
-    }
-    // A group that OPENS on this fragment but does not close on it (`{ npx biome lint .`).
-    if ((value.startsWith('{') || value.startsWith('(')) && !balancedWrapper(value)) {
-      const bracket = value[0];
-      out.push({ text: bracket, keyword: bracket === '{' ? '{' : '(', backgrounded: false });
-      const rest = value.slice(1).trim();
-      if (rest) push(rest, backgrounded);
-      return;
-    }
-    if ((value === '}' || value === ')') && true) {
-      out.push({ text: value, keyword: value, backgrounded: false });
-      return;
-    }
-    out.push({ text: value, keyword: leadingKeyword(value), backgrounded });
-  };
-  for (const line of text.split('\n')) {
-    for (const piece of splitTopLevel(line, ';')) {
-      for (const part of splitBackgrounded(piece)) push(part.text, part.backgrounded);
-    }
-  }
-  return out;
-}
-
-/** Collapses each OPAQUE construct into a single opaque statement fragment. */
-function collapseOpaque(frags) {
-  const out = [];
-  for (let i = 0; i < frags.length; i++) {
-    const frag = frags[i];
-    const rule = OPAQUE_BLOCKS.find((r) => r.open.test(frag.text.trim()));
-    if (!rule) {
-      out.push(frag);
-      continue;
-    }
-    let j = i;
-    const balanced =
-      (frag.text.match(/\{/g) ?? []).length === (frag.text.match(/\}/g) ?? []).length;
-    // The `balanced` shortcut is for a definition written on ONE fragment (`f() { …; }`); a
-    // `case` has no braces at all, so applying it there left `esac` stranded.
-    if (rule.close && !(balanced && /\{/.test(frag.text))) {
-      j++;
-      while (j < frags.length && !rule.close.test(frags[j].text.trim())) j++;
-      if (j >= frags.length) j = frags.length - 1; // never terminated: it swallows the rest
-    } else if (!rule.close) {
-      // No terminator this reader can recognise: the construct swallows the rest of the text.
-      j = frags.length - 1;
-    }
-    out.push({
-      text: frags
-        .slice(i, j + 1)
-        .map((f) => f.text)
-        .join('; '),
-      keyword: '',
-      backgrounded: false,
-      opaque: rule.why,
-    });
-    i = j;
-  }
-  return out;
-}
-
-/** Parses fragments into a tree of `simple`, `if`, `loop` and `group` nodes. */
-function parseSequence(frags, state, stop) {
-  const nodes = [];
-  while (state.i < frags.length) {
-    const frag = frags[state.i];
-    if (stop.has(frag.keyword)) break;
-    if (frag.keyword === 'if') {
-      nodes.push(parseIf(frags, state));
-      continue;
-    }
-    if (BLOCK_OPENERS.has(frag.keyword)) {
-      nodes.push(parseLoop(frags, state));
-      continue;
-    }
-    if (frag.keyword === '{' || frag.keyword === '(') {
-      nodes.push(parseGroup(frags, state));
-      continue;
-    }
-    if (frag.keyword) throw new Unresolved(`unbalanced \`${frag.keyword}\``);
-    nodes.push(simpleNode(frag));
-    state.i++;
-  }
-  return nodes;
-}
-
-/** A `{ … }` or `( … )` group spanning several fragments. */
-function parseGroup(frags, state) {
-  const open = frags[state.i].keyword;
-  const close = open === '{' ? '}' : ')';
-  state.i++;
-  const body = parseSequence(frags, state, new Set([close]));
-  expectKeyword(frags, state, close);
-  return { type: 'group', body, text: `${open} … ${close}`, backgrounded: false };
-}
-
-/** A simple statement — unwrapped when it is wholly a subshell or brace group on one fragment. */
-function simpleNode(frag) {
-  const text = frag.text.trim();
-  if (frag.opaque) return { type: 'simple', text, opaque: frag.opaque, backgrounded: false };
-  const wrapped = /^\((.*)\)$/s.exec(text) ?? /^\{(.*)\}$/s.exec(text);
-  if (wrapped && balancedWrapper(text)) {
-    const inner = wrapped[1].replace(/;\s*$/, '').trim();
-    if (inner) {
-      const innerFrags = collapseOpaque(fragmentsOf(inner));
-      const state = { i: 0 };
-      const nodes = parseSequence(innerFrags, state, new Set());
-      if (state.i === innerFrags.length && nodes.length) {
-        return { type: 'group', body: nodes, text, backgrounded: !!frag.backgrounded };
-      }
-    }
-  }
-  return { type: 'simple', text, backgrounded: !!frag.backgrounded };
-}
-
-/** True when the outermost bracket of `text` closes exactly at its end. */
-function balancedWrapper(text) {
-  const masked = stripQuotedRegions(text);
-  const open = masked[0];
-  if (open !== '(' && open !== '{') return false;
-  const close = open === '(' ? ')' : '}';
-  let depth = 0;
-  for (let i = 0; i < masked.length; i++) {
-    if (masked[i] === open) depth++;
-    else if (masked[i] === close) {
-      depth--;
-      if (depth === 0) return i === masked.length - 1;
-    }
-  }
-  return false;
-}
-
-function parseIf(frags, state) {
-  const head = frags[state.i].text.replace(/^if\b/, '').trim();
-  state.i++;
-  const cond = head ? [{ type: 'simple', text: head }] : [];
-  cond.push(...parseSequence(frags, state, new Set(['then'])));
-  expectKeyword(frags, state, 'then');
-  const branches = [
-    { kind: 'then', body: parseSequence(frags, state, new Set(['elif', 'else', 'fi'])) },
-  ];
-  while (frags[state.i]?.keyword === 'elif') {
-    const elifHead = frags[state.i].text.replace(/^elif\b/, '').trim();
-    state.i++;
-    const elifCond = elifHead ? [{ type: 'simple', text: elifHead }] : [];
-    elifCond.push(...parseSequence(frags, state, new Set(['then'])));
-    expectKeyword(frags, state, 'then');
-    branches.push({
-      kind: 'elif',
-      cond: elifCond,
-      body: parseSequence(frags, state, new Set(['elif', 'else', 'fi'])),
-    });
-  }
-  if (frags[state.i]?.keyword === 'else') {
-    state.i++;
-    branches.push({ kind: 'else', body: parseSequence(frags, state, new Set(['fi'])) });
-  }
-  expectKeyword(frags, state, 'fi');
-  return { type: 'if', cond, branches };
-}
-
-function parseLoop(frags, state) {
-  const kind = frags[state.i].keyword;
-  const head = frags[state.i].text.replace(/^(while|until|for)\b/, '').trim();
-  state.i++;
-  const cond = head ? [{ type: 'simple', text: head }] : [];
-  cond.push(...parseSequence(frags, state, new Set(['do'])));
-  expectKeyword(frags, state, 'do');
-  const body = parseSequence(frags, state, new Set(['done']));
-  expectKeyword(frags, state, 'done');
-  // `for x in <non-empty literal list>` demonstrably executes its body; a `while`/`until`
-  // condition does not, and this reader does not pretend otherwise.
-  const list = /^\S+\s+in\s+(.+)$/.exec(head ?? '');
-  const executes = kind === 'for' && !!list && !/\$|\*|\?/.test(list[1]) && !!list[1].trim();
-  return { type: 'loop', kind, cond, body, executes };
-}
-
-function expectKeyword(frags, state, keyword) {
-  if (frags[state.i]?.keyword !== keyword) throw new Unresolved(`expected \`${keyword}\``);
-  state.i++;
-}
-
-/**
- * Parses a whole command. Substitutions are masked as values, here-doc bodies dropped as data,
- * line continuations joined, and constructs whose structure this reader will not interpret
- * collapsed into single opaque statements — so `Unresolved` is now thrown only when the command
- * cannot be given a shape at all.
- */
-function parseCommand(command) {
-  const heredoc = stripHeredocs(joinContinuations(executableText(command)));
-  const text = maskSubstitutions(heredoc.text);
-  let frags = collapseOpaque(fragmentsOf(text));
-  if (heredoc.unterminated && frags.length) {
-    frags = [
-      ...frags.slice(0, -1),
-      { ...frags[frags.length - 1], opaque: heredoc.unterminated, keyword: '' },
-    ];
-  }
-  const state = { i: 0 };
-  const nodes = parseSequence(frags, state, new Set());
-  if (state.i !== frags.length) throw new Unresolved(`unbalanced \`${frags[state.i].keyword}\``);
-  return nodes;
-}
-
-/**
- * The lines of a shell SCRIPT that are DEMONSTRABLY EXECUTED — an allowlist, for the same
- * reason `skip` and `exclude` are. A pin recorded anywhere else is not reconciled: enumerating
- * the constructs that do not run (`if false`, and then `while false`, `until true`, `for x in ;`,
- * a trailing `exit 0`, an uncalled function…) is a list that is always one shape short.
- *
- * Credited: a line at block depth zero, before any unconditional top-level `exit`, with
- * comments stripped, continuations joined and here-document bodies removed. Everything inside
- * any block — including a function body, which does not run where it is written — is not.
- */
-function liveScriptLines(text) {
-  const heredoc = stripHeredocs(joinContinuations(executableText(text)));
-  const OPENERS = ['if', 'while', 'until', 'for', 'case', 'select'];
-  const CLOSERS = ['fi', 'done', 'esac'];
-  const out = [];
-  let depth = 0;
-  let stopped = false;
-  for (const raw of heredoc.text.split('\n')) {
-    if (stopped) break;
-    const atTopLevel = depth === 0;
-    let closedHere = false;
-    for (const piece of splitTopLevel(raw, ';')) {
-      let statement = piece.trim();
-      if (!statement) continue;
-      let keyword = leadingKeyword(statement);
-      while (keyword === 'then' || keyword === 'do' || keyword === 'else') {
-        statement = statement.slice(keyword.length).trim();
-        keyword = leadingKeyword(statement);
-      }
-      const word = statement.split(/\s+/)[0] ?? '';
-      if (OPENERS.includes(word)) depth++;
-      else if (CLOSERS.includes(word)) depth = Math.max(0, depth - 1);
-      // A function body is delimited by braces, so counting the braces IS counting the
-      // definition — incrementing for both left the depth stuck above zero and credited
-      // nothing at all.
-      const braces = (statement.match(/\{/g) ?? []).length - (statement.match(/\}/g) ?? []).length;
-      if (braces > 0) depth += braces;
-      else if (braces < 0) {
-        depth = Math.max(0, depth + braces);
-        closedHere = true;
-      }
-      if (depth === 0 && /^exit\b/.test(statement)) stopped = true;
-    }
-    if (atTopLevel && depth === 0 && !closedHere) out.push(raw);
-  }
-  return out.join('\n');
-}
-
-/** Is a simple statement's exit status statically NON-zero — a command that always fails? */
-function alwaysFails(ctx, text) {
-  const analysis = analyseCommand(unwrapLast(text), ctx.pkg);
-  if (analysis.tool === 'exit' || analysis.tool === 'return') {
-    const code = analysis.args[0];
-    return !!code && code !== '0' && !code.includes('$');
-  }
-  return analysis.tool === 'false';
-}
-
-/** Is a simple statement's exit status statically zero — a command that cannot fail? */
-function cannotFail(ctx, text) {
-  const analysis = analyseCommand(unwrapLast(text), ctx.pkg);
-  if (analysis.tool === 'exit') {
-    const code = analysis.args[0];
-    return !code || code === '0';
-  }
-  return classifyWork(analysis, analysis.args, workOptionsFor(ctx, analysis)).status === 'FAIL';
-}
-
-/** Does this statement PRESERVE a preceding status rather than replacing it? (`exit $?`) */
-function preservesStatus(text) {
-  return /^exit\s+"?\$\{?\?\}?"?\s*$/.test(String(text).trim());
-}
-
-/**
- * The `||`/`&&` elements of a statement, in order. An operator nested inside a `( … )` or
- * `{ … }` belongs to that group, not to this list, so only depth-0 operators split.
- */
-function listElements(text) {
-  const value = String(text);
-  const masked = stripQuotedRegions(value);
-  const out = [];
-  let operator = null;
-  let start = 0;
-  let depth = 0;
-  for (let i = 0; i < masked.length; i++) {
-    const c = masked[i];
-    if (c === '(' || c === '{') depth++;
-    else if (c === ')' || c === '}') depth = Math.max(0, depth - 1);
-    if (depth !== 0) continue;
-    const op = masked.startsWith('||', i) ? '||' : masked.startsWith('&&', i) ? '&&' : null;
-    if (!op) continue;
-    out.push({ operator, text: value.slice(start, i).trim() });
-    operator = op;
-    i++;
-    start = i + 1;
-  }
-  out.push({ operator, text: value.slice(start).trim() });
-  return out.filter((e) => e.text);
-}
-
-/**
- * A group's exit status is its LAST statement's, so `{ echo failed; exit 1; }` is judged by
- * `exit 1`. Without this, every predicate below read a whole group as one opaque word.
- */
-function unwrapLast(text) {
-  let value = String(text).trim();
-  for (let guard = 0; guard < 8; guard++) {
-    if (!balancedWrapper(value)) return value;
-    const inner = value.slice(1, -1).trim().replace(/;\s*$/, '').trim();
-    const parts = inner.split('\n').flatMap((line) => splitTopLevel(line, ';'));
-    const last = parts
-      .map((part) => part.trim())
-      .filter(Boolean)
-      .pop();
-    if (!last || last === value) return value;
-    value = last;
-  }
-  return value;
-}
-
-/** The `|` elements of one list element, in order. */
-function pipelineElements(text) {
-  // `a |& b` is `a 2>&1 | b`: a pipeline, so only the last element's status survives without
-  // `pipefail`. Reporting it as backgrounding named the wrong mechanism and quoted a truncated
-  // command, which an owner cannot act on.
-  return splitTopLevel(String(text).replace(/\|&/g, '|'), '|')
-    .map((part) => part.trim())
-    .filter(Boolean);
-}
-
-/** Blanks out quoted spans so operator scanning never fires inside a string. */
-function stripQuotedRegions(text) {
-  const chars = [...String(text)];
-  for (const [start, end] of quotedRanges(String(text))) {
-    for (let i = start; i < end && i < chars.length; i++) chars[i] = ' ';
-  }
-  return chars.join('');
-}
-
-const SET_ERREXIT_ON = /^set\s+(-[a-zA-Z]*e[a-zA-Z]*(\s|$)|-o\s+errexit\b)/;
-const SET_ERREXIT_OFF = /^set\s+(\+[a-zA-Z]*e[a-zA-Z]*(\s|$)|\+o\s+errexit\b)/;
-const SET_PIPEFAIL_ON = /^set\s+[^\n]*-o\s+pipefail\b/;
-const SET_PIPEFAIL_OFF = /^set\s+[^\n]*\+o\s+pipefail\b/;
-
-/** Does this statement install a trap that forces the exit status? */
-function trapVerdict(text) {
-  const statement = String(text).trim();
-  if (!/^trap\s/.test(statement) || !/\bEXIT\b/.test(statement)) return null;
-  if (/exit\s+0|exit\s*['"]?\s*$/.test(statement)) {
-    return { status: 'FAIL', why: `\`${statement}\` forces the exit status from an EXIT trap` };
-  }
-  return {
-    status: 'UNRESOLVED',
-    why: `\`${statement}\` installs an EXIT trap this checker cannot evaluate`,
-  };
-}
-
-/**
- * Every simple statement of a tree in EXECUTION order, each with the block path that reaches
- * it. Used both to locate the tool and to compute shell state at that point — state has to be
- * global to the command, because an `if` body is a different sequence and an outer
- * `set -euo pipefail` (or an outer `set +e`) is invisible to a body-local scan. That single
- * omission produced a false FAIL on the guard-then-check idiom and a false PASS on CI at once.
- */
-function flatten(nodes, path = [], out = []) {
-  for (const node of nodes) {
-    if (node.type === 'simple') {
-      out.push({ node, path });
-      continue;
-    }
-    if (node.type === 'group') {
-      flatten(node.body, [...path, { node, role: 'body', body: node.body }], out);
-      continue;
-    }
-    if (node.type === 'if') {
-      flatten(node.cond, [...path, { node, role: 'condition' }], out);
-      for (const branch of node.branches) {
-        if (branch.cond) flatten(branch.cond, [...path, { node, role: 'condition' }], out);
-        flatten(branch.body, [...path, { node, role: 'body', body: branch.body }], out);
-      }
-      continue;
-    }
-    if (node.type === 'loop') {
-      flatten(node.cond, [...path, { node, role: 'condition' }], out);
-      flatten(node.body, [...path, { node, role: 'body', body: node.body }], out);
-    }
-  }
-  return out;
-}
-
-/** Locates the tool inside a statement: which `||`/`&&` element and which pipeline element. */
-function locateInStatement(text, locate) {
-  const elements = listElements(text);
-  for (let e = 0; e < elements.length; e++) {
-    const pipeline = pipelineElements(elements[e].text);
-    for (let p = 0; p < pipeline.length; p++) {
-      if (locate(pipeline[p])) return { elements, elementIndex: e, pipeline, pipeIndex: p };
-      // `find … -exec <tool> {} +` runs the tool as its own argument list.
-      const exec = /\s-(?:exec|execdir)\s+(.+?)(?:\s+[;+]|$)/.exec(pipeline[p]);
-      if (exec && locate(exec[1])) return { elements, elementIndex: e, pipeline, pipeIndex: p };
-    }
-  }
-  return null;
-}
-
-/**
- * W20's core. Returns PASS with the demonstrated path, FAIL with the discarding construct, or
- * UNRESOLVED with what could not be read.
- */
-function propagationVerdict(ctx, command, locate, opts = {}) {
-  let nodes = null;
-  let unreadable = null;
-  try {
-    nodes = parseCommand(command);
-  } catch (e) {
-    if (!(e instanceof Unresolved)) throw e;
-    unreadable = e.message;
-  }
-
-  // FLOOR: a demonstrable swallow is reported even when the rest of the command is unreadable.
-  if (!nodes) {
-    const demonstrated = degradedSwallow(ctx, command, locate, opts);
-    if (demonstrated) return demonstrated;
-    return {
-      status: 'UNRESOLVED',
-      why: `the command contains ${unreadable}, which this checker will not interpret`,
-    };
-  }
-  if (!nodes.length) return { status: 'UNRESOLVED', why: 'no command to judge' };
-
-  const statements = flatten(nodes);
-  const found = statements
-    .map((entry) => ({ ...entry, hit: locateInStatement(entry.node.text, locate) }))
-    .filter((entry) => entry.hit)
-    .pop();
-
-  if (!found) {
-    // The tool could not be identified — `make lint`, `scripts/lint.sh`, a workspace filter,
-    // an `-exec` form. Closing that shape by shape is the same mistake as listing swallows, so
-    // it is closed as a CLASS: judge the statement that DOES decide the command's status. If
-    // that path is intact the command can still report a failure, whatever it runs; if it
-    // cannot fail, the command cannot either.
-    // An indirection whose body is IN THE REPOSITORY is followed before giving up: the
-    // swallow lives in the script or the make target as often as in the command that calls it.
-    if ((opts.depth ?? 0) < 2) {
-      for (const entry of statements) {
-        const indirect = indirectPropagation(ctx, entry.node.text, locate, opts, opts.depth ?? 0);
-        if (indirect) return indirect;
-      }
-    }
-    const last = statements[statements.length - 1];
-    if (!last) return { status: 'UNRESOLVED', why: 'no command to judge' };
-    if (last.node.opaque) {
-      return {
-        status: 'UNRESOLVED',
-        why: `the command ends in ${last.node.opaque}, which this checker will not interpret`,
-      };
-    }
-    const tail = listElements(last.node.text).at(-1)?.text ?? last.node.text;
-    if (cannotFail(ctx, tail)) {
-      return {
-        status: 'FAIL',
-        why: `the command's last statement \`${last.node.text}\` cannot fail`,
-      };
-    }
-    const tailHit = {
-      node: last.node,
-      hit: {
-        elements: listElements(last.node.text),
-        elementIndex: listElements(last.node.text).length - 1,
-        pipeline: pipelineElements(tail),
-        pipeIndex: pipelineElements(tail).length - 1,
-      },
-    };
-    const tailOwn = statementPropagation(ctx, tailHit, opts);
-    if (tailOwn.status !== 'PASS') return tailOwn;
-    return {
-      status: 'PASS',
-      why: `the tool was not identifiable, but \`${last.node.text}\` decides the command's exit status and can fail`,
-    };
-  }
-  if (found.node.opaque) {
-    return {
-      status: 'UNRESOLVED',
-      why: `the tool runs inside ${found.node.opaque}, which this checker will not interpret`,
-    };
-  }
-
-  // Shell state at the tool, from the statements that run BEFORE it — and only those. `found`
-  // is a COPY of its `statements` entry (it carries the located `hit`), so an identity test
-  // against the entry never held and the walk ran past the tool: a `set -e` written BELOW the
-  // check was read as if it protected it, which is a false PASS (`bash -c 'false; set -e; echo
-  // done'` exits 0), and a `set +e` below it cancelled CI errexit that had already aborted at
-  // the failure, which is a false FAIL. The NODE is the identity the two share.
-  let errexit = !!opts.errexit;
-  let pipefail = !!opts.pipefail;
-  for (const entry of statements) {
-    if (entry.node === found.node) break;
-    const text = entry.node.text.trim();
-    if (SET_ERREXIT_ON.test(text)) errexit = true;
-    else if (SET_ERREXIT_OFF.test(text)) errexit = false;
-    if (SET_PIPEFAIL_OFF.test(text)) pipefail = false;
-    else if (SET_PIPEFAIL_ON.test(text)) pipefail = true;
-  }
-
-  // An EXIT trap is the exception: it fires wherever it is installed, so the WHOLE command is
-  // swept for one. (`bash -c 'false; trap "exit 0" EXIT; echo done'` exits 0.)
-  for (const entry of statements) {
-    const trap = trapVerdict(entry.node.text.trim());
-    if (trap) return trap;
-  }
-
-  const own = statementPropagation(ctx, found, { ...opts, pipefail });
-  if (own.status !== 'PASS') return own;
-  const analysis0 = analyseCommand(found.hit.pipeline[found.hit.pipeIndex], ctx.pkg);
-
-  // The resolved body of an `npm run <script>` indirection is part of the path: the swallow
-  // frequently lives in package.json, which the outer text never shows.
-  const indirect = indirectPropagation(
-    ctx,
-    found.hit.pipeline[found.hit.pipeIndex],
-    (candidate) => commandMatchesTool(analyseCommand(candidate, ctx.pkg), analysis0.tool),
-    opts,
-    opts.depth ?? 0,
-  );
-  if (indirect && indirect.status !== 'PASS') return indirect;
-
-  let current = found.node;
-  for (const step of [...found.path].reverse()) {
-    if (step.role === 'condition') {
-      const kind = step.node.type === 'loop' ? step.node.kind : 'if';
-      return {
-        status: 'FAIL',
-        why: `the tool runs as the \`${kind}\` CONDITION, so its status is consumed by the test and never becomes the command's`,
-      };
-    }
-    if (step.node.type === 'loop' && !step.node.executes) {
-      return {
-        status: 'UNRESOLVED',
-        why: `the tool runs inside a \`${step.node.kind}\` loop, whose body this checker cannot show executes`,
-      };
-    }
-    const seq = sequencePropagation(step.body, current, errexit);
-    if (seq.status !== 'PASS') return seq;
-    current = step.node;
-  }
-  const top = sequencePropagation(nodes, current, errexit);
-  if (top.status !== 'PASS') return top;
-  return { status: 'PASS', why: `\`${found.node.text}\` decides the command's exit status` };
-}
-
-/**
- * A demonstrable swallow found WITHOUT a full parse, so an unreadable construct elsewhere in
- * the command cannot launder it (the contract's floor rule).
- */
-function degradedSwallow(ctx, command, locate, opts) {
-  const text = maskSubstitutions(stripHeredocs(joinContinuations(executableText(command))).text);
-  const statements = [];
-  for (const line of text.split('\n')) {
-    for (const piece of splitTopLevel(line, ';')) {
-      for (const part of splitBackgrounded(piece)) statements.push(part);
-    }
-  }
-  let errexit = !!opts.errexit;
-  let index = -1;
-  for (let i = 0; i < statements.length; i++) {
-    const part = statements[i];
-    const hit = locateInStatement(part.text, locate);
-    if (hit) {
-      index = i;
-      const verdict = statementPropagation(
-        ctx,
-        { node: { text: part.text, backgrounded: part.backgrounded }, hit },
-        opts,
-      );
-      if (verdict.status === 'FAIL') return verdict;
-      break;
-    }
-    const trap = trapVerdict(part.text);
-    if (trap && trap.status === 'FAIL') return trap;
-    if (SET_ERREXIT_ON.test(part.text.trim())) errexit = true;
-    else if (SET_ERREXIT_OFF.test(part.text.trim())) errexit = false;
-  }
-  // POSITION is demonstrable without a parse whenever the command has no block structure at
-  // all: every fragment is then a top-level statement, and the last one decides the status.
-  // Leaving this to the parse tree is what let one unreadable token launder the swallow class
-  // the contract lists FIRST.
-  const flat = statements.every((part) => !leadingKeyword(part.text));
-  if (flat && index >= 0 && index < statements.length - 1 && !errexit) {
-    const after = statements.slice(index + 1);
-    if (!after.every((part) => preservesStatus(part.text))) {
-      return {
-        status: 'FAIL',
-        why: `\`${statements[index].text}\` runs the check but \`${after[after.length - 1].text}\` decides the exit status, and errexit is not in effect — put the check last, add \`set -e\`, or end with \`exit $?\``,
-      };
-    }
-  }
-  return null;
-}
-
-/** Propagation WITHIN the statement that invokes the tool. */
-function statementPropagation(ctx, found, opts) {
-  const { elements, elementIndex, pipeline, pipeIndex } = found.hit;
-  const element = pipeline[pipeIndex];
-
-  if (found.node.backgrounded) {
-    return {
-      status: 'FAIL',
-      why: `\`${found.node.text}\` is backgrounded with \`&\`, so its status is never the command's`,
-    };
-  }
-  if (/^!\s/.test(elements[elementIndex].text.trim())) {
-    return {
-      status: 'FAIL',
-      why: `\`${elements[elementIndex].text.trim()}\` is NEGATED with \`!\`, which inverts the control rather than reporting it`,
-    };
-  }
-  if (pipeline.length > 1 && pipeIndex !== pipeline.length - 1 && !opts.pipefail) {
-    return {
-      status: 'FAIL',
-      why: `the tool is piped into \`${pipeline[pipeline.length - 1]}\` without \`pipefail\`, so only that command's status survives`,
-    };
-  }
-  const trap = trapVerdict(element);
-  if (trap) return trap;
-  for (let i = elementIndex + 1; i < elements.length; i++) {
-    if (elements[i].operator !== '||') continue;
-    if (cannotFail(ctx, elements[i].text)) {
-      return {
-        status: 'FAIL',
-        why: `a failure is rescued by \`|| ${elements[i].text}\`, which cannot fail`,
-      };
-    }
-    if (alwaysFails(ctx, elements[i].text)) continue;
-    return {
-      status: 'UNRESOLVED',
-      why: `a failure is rescued whenever \`${elements[i].text}\` succeeds, so the tool's status cannot be shown to reach the command's`,
-    };
-  }
-  return { status: 'PASS', why: '' };
-}
-
-/** Follows an `npm run <script>` indirection into package.json and judges the script body. */
-/**
- * Does the resolved body actually INVOKE what the locator is tracking? A mention is not enough:
- * `scripts/assert-tool-versions.sh` prints its own name in a success message, and judging a body
- * that only MENTIONS the tool treats the indirection's exit status as the tool's — which read a
- * script that exits 1 on mismatch as a swallow because it ends with a success message.
- */
-function bodyInvokes(body, locate) {
-  let statements;
-  try {
-    statements = flatten(parseCommand(body)).map((entry) => entry.node.text);
-  } catch (e) {
-    if (!(e instanceof Unresolved)) throw e;
-    statements = executableText(body)
-      .split('\n')
-      .flatMap((line) => splitTopLevel(line, ';'))
-      .map((t) => t.trim())
-      .filter(Boolean);
-  }
-  return statements.some((statement) => !!locateInStatement(statement, locate));
-}
-
-function indirectPropagation(ctx, text, locate, opts, depth = 0) {
-  if (depth > 2) return null;
-  const analysis = analyseCommand(text, ctx.pkg);
-  let source = null;
-  let body = null;
-  if (analysis.resolvedFrom && typeof ctx.pkg?.scripts?.[analysis.resolvedFrom] === 'string') {
-    source = `the script \`${analysis.resolvedFrom}\` in package.json`;
-    body = ctx.pkg.scripts[analysis.resolvedFrom];
-  } else {
-    const resolved = resolveIndirection(ctx, text);
-    if (resolved?.commands.length) {
-      source = resolved.source;
-      body = resolved.commands.join('\n');
-    }
-  }
-  if (!body?.trim()) return null;
-  if (!bodyInvokes(body, locate)) return null;
-  const inner = propagationVerdict(ctx, body, locate, {
-    ...opts,
-    errexit: false,
-    pipefail: false,
-    depth: depth + 1,
-  });
-  if (inner.status === 'PASS') return inner;
-  return {
-    status: inner.status,
-    why: `${source} ${inner.status === 'FAIL' ? 'discards it' : 'cannot be shown to propagate it'}: ${inner.why}`,
-  };
-}
-
-/** Propagation from one node to the END of the sequence that contains it. */
-function sequencePropagation(sequence, node, errexit) {
-  const index = sequence.indexOf(node);
-  if (index < 0)
-    return { status: 'UNRESOLVED', why: 'the statement could not be placed in its command' };
-  if (index === sequence.length - 1) return { status: 'PASS', why: '' };
-  if (errexit) return { status: 'PASS', why: '' };
-  const after = sequence.slice(index + 1);
-  if (after.every((n) => n.type === 'simple' && preservesStatus(n.text))) {
-    return { status: 'PASS', why: '' };
-  }
-  const trailing = after[after.length - 1];
-  const trailingText =
-    trailing.type === 'simple'
-      ? trailing.opaque
-        ? `${trailing.opaque} (\`${firstLine(trailing.text).trim()}\`)`
-        : trailing.text
-      : `a ${trailing.type} block`;
-  const nodeText = node.type === 'simple' ? node.text : `the ${node.type} block`;
-  return {
-    status: 'FAIL',
-    why: `\`${nodeText}\` runs the check but \`${trailingText}\` decides the exit status, and errexit is not in effect — put the check last, add \`set -e\`, or end with \`exit $?\``,
-  };
-}
-
-/**
- * W20's entry point. `opts`: `{ tools, needle, ci, shell }` — `tools`/`needle` locate the
- * tool-bearing statement (the same matchers W17 and W12 use), `ci` selects the provider's
- * default shell semantics, `shell` is a declared shell.
- */
-function signalVerdict(ctx, command, opts = {}) {
-  const { tools = [], needle = '' } = opts;
-  const locate = (text) => {
-    if (needle) return runContains(text, needle) === true;
-    if (tools.length)
-      return tools.some((t) => commandMatchesTool(analyseCommand(text, ctx.pkg), t));
-    return false;
-  };
-  // GitHub Actions runs `run:` under `bash -e`, and `shell: bash` additionally adds `pipefail`.
-  // A shell other than bash is a different interpreter with different flags, and this checker
-  // does not guess at it.
-  const errexit = !!opts.ci;
-  let pipefail = false;
-  if (opts.ci && opts.shell) {
-    if (String(opts.shell).trim() === 'bash') pipefail = true;
-    else {
-      return {
-        status: 'UNRESOLVED',
-        why: `the step declares \`shell: ${opts.shell}\`, whose error handling this checker does not assume`,
-      };
-    }
-  }
-  return propagationVerdict(ctx, command, locate, { ...opts, errexit, pipefail });
-}
-
 /**
  * A signal verdict mapped onto a REPORTED status. `UNRESOLVED` is the reader's internal
  * sentinel — never a verdict — and the contract's floor rule places it at INFO below profile 4
@@ -2217,56 +1235,9 @@ function signalPhrase(status) {
   return status === 'FAIL' ? 'is not signal-bearing' : 'cannot be shown to be signal-bearing';
 }
 
-/** Does this command invoke `tool` anywhere in an executed position? (W17's identity test.) */
-function commandInvokesTool(ctx, command, tool, depth = 0) {
-  const locate = (text) => commandMatchesTool(analyseCommand(text, ctx.pkg), tool);
-  let statements;
-  try {
-    statements = liveStatements(command).map((text) => ({ text }));
-  } catch (e) {
-    if (!(e instanceof Unresolved)) throw e;
-    statements = executableText(command)
-      .split('\n')
-      .flatMap((line) => splitTopLevel(line, ';'))
-      .map((text) => ({ text: text.trim() }))
-      .filter((s) => s.text);
-  }
-  for (const statement of statements) {
-    const hit = locateInStatement(statement.text, locate);
-    if (hit) return hit.pipeline[hit.pipeIndex];
-  }
-  if (depth < 2) {
-    for (const statement of statements) {
-      const indirect = resolveIndirection(ctx, statement.text);
-      if (!indirect) continue;
-      for (const inner of indirect.commands) {
-        const found = commandInvokesTool(ctx, inner, tool, depth + 1);
-        if (found) return found;
-      }
-    }
-  }
-  return null;
-}
-
-/** `continue-on-error` on a step or its job: true swallows, an expression is unverifiable. */
-function continueOnErrorVerdict(value) {
-  if (value === undefined || value === null || value === false) return null;
-  const text = String(value);
-  if (text.includes('${{')) return { status: 'UNKNOWN', text };
-  if (value === true || /^(true|yes|on)$/i.test(text)) return { status: 'FAIL', text };
-  return null;
-}
-
-/** The pinned config file this checker knows for a tool, when it exists on disk (A12's map). */
-function pinnedConfigFor(ctx, tool) {
-  const candidates = TOOL_CONFIGS[tool];
-  if (!candidates) return null;
-  return candidates.find((c) => !c.endsWith('/') && existsSync(join(ctx.root, c))) ?? null;
-}
-
 /** Work-classification options for a command: which pinned config, if any, drives it. */
 function workOptionsFor(ctx, analysis, tool) {
-  const configFile = pinnedConfigFor(ctx, tool ?? analysis.tool);
+  const configFile = pinnedConfigFor(ctx.root, tool ?? analysis.tool);
   return configFile ? { configFile } : {};
 }
 
@@ -2439,6 +1410,111 @@ function jobText(def) {
 }
 
 // ---------------------------------------------------------------------------------------
+// Where the harness runs a tool (A12)
+// ---------------------------------------------------------------------------------------
+
+/** Runners whose directory flag moves the command into another directory, and those flags. */
+const DIR_FLAG_RUNNERS = new Set(['npm', 'pnpm', 'yarn', 'bun', 'uv', 'poetry', 'make']);
+const DIR_FLAGS = new Set(['--prefix', '-C', '--dir', '--cwd', '--directory', '--project']);
+
+/**
+ * `dir` joined onto the root-relative `base` ('' is the root) — or null for a directory this
+ * checker cannot place inside the repository: absolute, an expression or a variable, or one
+ * that climbs out of it.
+ */
+function repoDir(base, dir) {
+  if (base === null || typeof dir !== 'string' || !dir.trim()) return base;
+  const d = dir.trim().replace(/^["']|["']$/g, '');
+  if (isAbsolute(d) || /[$`{~]/.test(d)) return null;
+  const joined = posix.normalize(posix.join(base || '.', d)).replace(/\/$/, '');
+  if (joined === '..' || joined.startsWith('../')) return null;
+  return joined === '.' ? '' : joined;
+}
+
+/**
+ * Every root-relative directory the harness runs `tool` from. Each hook job starts in its
+ * lefthook `root:` (nested groups included) and each CI step in its `working-directory` (else
+ * the job's or the workflow's default); a `cd <dir>` earlier on the same line moves it, and so
+ * does a runner's directory flag (`npm --prefix app`, `pnpm -C app`, `yarn --cwd app`, `uv run
+ * --directory app`, `make -C app`). `npm run <script>` is resolved through THAT directory's
+ * package.json, which is where the script the runner executes is defined, and every command of
+ * the script's body is read — `prisma generate && tsc --noEmit` runs tsc too.
+ */
+function toolRunDirs(ctx, tool) {
+  const dirs = new Set();
+  const visit = (base, text, depth = 0) => {
+    if (base === null || depth > 3) return;
+    for (const line of executableText(text).split('\n')) {
+      let dir = base;
+      for (const segment of splitTopLevel(line, '&&').flatMap((s) => splitTopLevel(s, ';'))) {
+        const cd = /^\s*cd\s+(\S+)\s*$/.exec(segment);
+        if (cd) {
+          dir = repoDir(dir, cd[1]);
+          if (dir === null) break;
+          continue;
+        }
+        const tokens = tokenize(segment);
+        const runner = DIR_FLAG_RUNNERS.has(basename(tokens[0] ?? ''));
+        let at = dir;
+        const kept = [];
+        for (let i = 0; i < tokens.length; i++) {
+          const assigned = runner ? /^(--[a-z]+)=(.+)$/.exec(tokens[i]) : null;
+          if (assigned && DIR_FLAGS.has(assigned[1])) at = repoDir(at, assigned[2]);
+          else if (runner && i > 0 && DIR_FLAGS.has(tokens[i]) && i + 1 < tokens.length) {
+            at = repoDir(at, tokens[++i]);
+          } else kept.push(tokens[i]);
+        }
+        if (at === null) continue;
+        const pkg = readJson(join(ctx.root, at, 'package.json'));
+        const body = packageScript(kept, pkg);
+        if (body !== null) visit(at, body, depth + 1);
+        else if (commandMatchesTool(analyseCommand(kept.join(' '), pkg), tool)) dirs.add(at);
+      }
+    }
+  };
+  const walkJob = (def, base, depth = 0) => {
+    if (!def || typeof def !== 'object' || depth > 4) return;
+    const here = typeof def.root === 'string' ? repoDir('', def.root) : base;
+    if (typeof def.run === 'string') visit(here, def.run);
+    for (const inner of Array.isArray(def.group?.jobs) ? def.group.jobs : []) {
+      walkJob(inner, here, depth + 1);
+    }
+  };
+  for (const job of mergedJobs(ctx.dump?.dump)) walkJob(job.def, '');
+  const wf = ctx.workflow;
+  if (wf?.exists) {
+    const fallback = wf.doc?.defaults?.run?.['working-directory'];
+    for (const job of wf.jobs) {
+      const jobDir = job.def?.defaults?.run?.['working-directory'] ?? fallback;
+      for (const step of job.steps) {
+        if (!step.run) continue;
+        const own = job.def?.steps?.[step.index]?.['working-directory'];
+        visit(repoDir('', own ?? jobDir ?? ''), step.run);
+      }
+    }
+  }
+  return dirs;
+}
+
+/** The body of the package.json script `tokens` run (`npm run x`, `npm test`, …), or null. */
+function packageScript(tokens, pkg) {
+  if (!['npm', 'pnpm', 'yarn', 'bun'].includes(basename(tokens[0] ?? ''))) return null;
+  const args = tokens.slice(1);
+  const name = args[0] === 'run' || args[0] === 'run-script' ? args[1] : args[0];
+  const body = name && !name.startsWith('-') ? pkg?.scripts?.[name] : undefined;
+  return typeof body === 'string' ? body : null;
+}
+
+/** The first of `candidates` in `dir` or in a directory above it, root-relative, or null. */
+function configAtOrAbove(dir, candidates, exists) {
+  for (let d = dir; ; d = posix.dirname(d) === '.' ? '' : posix.dirname(d)) {
+    const hit = candidates.map((c) => (d ? posix.join(d, c) : c)).find(exists);
+    if (hit) return hit;
+    if (!d) return null;
+  }
+}
+
+// ---------------------------------------------------------------------------------------
 // Checks — manifest (M*)
 // ---------------------------------------------------------------------------------------
 
@@ -2453,16 +1529,24 @@ function checkManifest(ctx, r, level) {
   r.add('M1', 'PASS', `${file}: valid JSON`, { file });
 
   const recorded = manifest.constitutionVersion;
-  if (typeof recorded === 'string' && KNOWN_PROFILES.includes(recorded)) {
+  if (recorded === '1' && ctx.judgment?.unsupported) {
+    r.add(
+      'M2',
+      'UNKNOWN',
+      `${file}: constitutionVersion "1" — profile 1 is not supported by this checker, so nothing in this report is judged; regenerate the harness at profile ${CURRENT_PROFILE} (references/migrations.md)`,
+      { file, hard: true, integrity: true },
+    );
+  } else if (typeof recorded === 'string' && KNOWN_PROFILES.includes(recorded)) {
     r.add('M2', 'PASS', `${file}: constitutionVersion "${recorded}"`, { file });
   } else {
     r.add(
       'M2',
       'UNKNOWN',
-      `${file}: constitutionVersion ${JSON.stringify(recorded)} is not a profile this checker knows (${KNOWN_PROFILES.join('/')}) — profile-${CURRENT_PROFILE} checks were run instead of trusting it`,
+      `${file}: constitutionVersion ${JSON.stringify(recorded)} is not a profile this checker knows (${KNOWN_PROFILES.join('/')}) — judged at profile ${ctx.judgment?.profile ?? CURRENT_PROFILE} instead of trusting it`,
       { file, hard: true },
     );
   }
+  for (const note of ctx.judgment?.notes ?? []) r.add('M2', 'INFO', `${file}: ${note}`, { file });
 
   const keys = Object.keys(milestoneEntries(manifest));
   const missing = MILESTONES.filter((m) => !keys.includes(m));
@@ -2482,30 +1566,66 @@ function checkManifest(ctx, r, level) {
     const where = `${file} milestones.${key}`;
     const hasSingle = typeof entry?.tool === 'string' && entry.tool !== '';
     const multi = Array.isArray(entry?.tools) ? entry.tools : null;
+    // A holder names its version by a literal (profile ≤5) or a typed pin (profile 6,
+    // contract §2.5) — never both.
+    const versioned = (h) =>
+      (typeof h?.version === 'string' && h.version !== '') || h?.pin !== undefined;
+    const both = (h) => h?.pin !== undefined && h?.version !== undefined;
     if (hasSingle && multi) {
       r.add('M4', 'FAIL', `${where}: has BOTH tool and tools[]`, { file });
     } else if (multi) {
       if (!multi.length) r.add('M4', 'FAIL', `${where}: tools[] is empty`, { file });
       for (const t of multi) {
-        if (!t?.stack || !t.tool || !t.version) {
-          r.add('M4', 'FAIL', `${where}: tools[] entry needs stack+tool+version`, { file });
+        if (!t?.stack || !t.tool || !versioned(t)) {
+          r.add('M4', 'FAIL', `${where}: tools[] entry needs stack+tool+version (or pin)`, {
+            file,
+          });
+        } else if (both(t)) {
+          r.add('M4', 'FAIL', `${where}: ${t.tool} records BOTH version and pin`, { file });
         }
       }
-      if (multi.length && multi.every((t) => t?.stack && t?.tool && t?.version)) {
+      if (multi.length && multi.every((t) => t?.stack && t?.tool && versioned(t) && !both(t))) {
         r.add('M4', 'PASS', `${where}: ${multi.length} per-stack tools`, { file });
       }
     } else if (hasSingle) {
-      if (typeof entry.version === 'string' && entry.version) {
-        r.add('M4', 'PASS', `${where}: ${entry.tool} ${entry.version}`, { file });
+      if (both(entry)) {
+        r.add('M4', 'FAIL', `${where}: ${entry.tool} records BOTH version and pin`, { file });
+      } else if (versioned(entry)) {
+        r.add('M4', 'PASS', `${where}: ${entry.tool} ${entry.version ?? '(typed pin)'}`, { file });
       } else {
         r.add('M4', 'FAIL', `${where}: tool without version`, { file });
       }
     } else {
       r.add('M4', 'FAIL', `${where}: neither tool+version nor tools[]`, { file });
     }
+    const holders = multi ?? (hasSingle ? [entry] : []);
+    if (level >= SINCE['M4.pin']) {
+      for (const h of holders) {
+        if (h?.pin === undefined && typeof h?.version === 'string') {
+          r.add(
+            'M4',
+            'FAIL',
+            `${where}: ${h.tool} records a copied version "${h.version}" — profile 6 records a typed pin into the file that pins it (contract §2.5)`,
+            { file, rule: 'M4.pin' },
+          );
+        }
+      }
+    }
 
-    const pairs = multi ? multi.map((t) => [t?.tool, t?.version]) : [[entry?.tool, entry?.version]];
-    for (const [tool, version] of pairs) {
+    for (const h of holders) {
+      const tool = h?.tool;
+      const rec = pinRecordOf(ctx, h);
+      if (rec?.form === 'pin') {
+        if (rec.error) {
+          r.add('M5', 'FAIL', `${where}: ${tool} pin does not resolve — ${rec.error.why}`, {
+            file,
+          });
+        } else {
+          r.add('M5', 'PASS', `${where}: ${tool} ${rec.version} (${rec.provenance})`, { file });
+        }
+        continue;
+      }
+      const version = h?.version;
       if (typeof version !== 'string') continue;
       if (!isPinnedVersion(version)) {
         r.add('M5', 'FAIL', `${where}: ${tool} version "${version}" is not a pinned version`, {
@@ -2549,7 +1669,23 @@ function checkManifest(ctx, r, level) {
       });
     } else {
       for (const a of auditors) {
-        if (!a || typeof a.tool !== 'string' || !isPinnedVersion(a.version)) {
+        const rec = pinRecordOf(ctx, a);
+        if (rec?.form === 'pin' && typeof a.tool === 'string') {
+          if (rec.error) {
+            r.add(
+              'M7',
+              'FAIL',
+              `${file}: auditor ${a.tool} pin does not resolve — ${rec.error.why}`,
+              {
+                file,
+              },
+            );
+          } else {
+            r.add('M7', 'PASS', `${file}: auditor ${a.tool} ${rec.version} (${rec.provenance})`, {
+              file,
+            });
+          }
+        } else if (!a || typeof a.tool !== 'string' || !isPinnedVersion(a.version)) {
           r.add(
             'M7',
             'FAIL',
@@ -2558,6 +1694,14 @@ function checkManifest(ctx, r, level) {
           );
         } else {
           r.add('M7', 'PASS', `${file}: auditor ${a.tool} ${a.version}`, { file });
+          if (level >= SINCE['M7.pin']) {
+            r.add(
+              'M7',
+              'FAIL',
+              `${file}: auditor ${a.tool} records a copied version — profile 6 records a typed pin (contract §2.5)`,
+              { file, rule: 'M7.pin' },
+            );
+          }
         }
       }
     }
@@ -2565,15 +1709,52 @@ function checkManifest(ctx, r, level) {
 
   if (level >= 3) {
     const hr = manifest.hookRunner;
-    if (!hr || typeof hr.name !== 'string' || !hr.name || !isPinnedVersion(hr.version)) {
+    const rec = pinRecordOf(ctx, hr);
+    if (rec?.form === 'pin' && typeof hr.name === 'string' && hr.name) {
+      if (rec.error) {
+        r.add('M8', 'FAIL', `${file}: hookRunner pin does not resolve — ${rec.error.why}`, {
+          file,
+        });
+      } else {
+        r.add('M8', 'PASS', `${file}: hookRunner ${hr.name} ${rec.version} (${rec.provenance})`, {
+          file,
+        });
+      }
+    } else if (!hr || typeof hr.name !== 'string' || !hr.name || !isPinnedVersion(hr.version)) {
       r.add('M8', 'FAIL', `${file}: hookRunner must record name + pinned version`, { file });
     } else {
       r.add('M8', 'PASS', `${file}: hookRunner ${hr.name} ${hr.version}`, { file });
+      if (level >= SINCE['M8.pin']) {
+        r.add(
+          'M8',
+          'FAIL',
+          `${file}: hookRunner records a copied version — profile 6 records a typed pin (contract §2.5)`,
+          { file, rule: 'M8.pin' },
+        );
+      }
     }
     if (typeof manifest.agentUse !== 'boolean') {
       r.add('M8', 'FAIL', `${file}: agentUse must be a boolean`, { file });
     } else if (manifest.agentUse === false && !manifest.agentUseRationale) {
       r.add('M8', 'FAIL', `${file}: agentUse false requires agentUseRationale`, { file });
+    }
+  }
+
+  // M13 — the harness runtimes are pinned (profile 6, contract §2.5): the vendored support
+  // scripts run on Node in every stack, so its version is a pin like any tool's.
+  if (level >= SINCE.M13) {
+    const runtimeRecs = (ctx.pinRecords ?? []).filter((x) => x.where.startsWith('runtimes.'));
+    if (!runtimeRecs.some((x) => x.where === 'runtimes.node')) {
+      r.add('M13', 'FAIL', `${file}: runtimes.node is required — the support scripts run on Node`, {
+        file,
+      });
+    }
+    for (const rec of runtimeRecs) {
+      if (rec.error) {
+        r.add('M13', 'FAIL', `${file}: ${rec.where} does not resolve — ${rec.error.why}`, { file });
+      } else {
+        r.add('M13', 'PASS', `${file}: ${rec.where} ${rec.version} (${rec.provenance})`, { file });
+      }
     }
   }
 
@@ -2715,39 +1896,26 @@ function walkJson(value, path, visit) {
 // Checks — artifacts (A*)
 // ---------------------------------------------------------------------------------------
 
-const TOOL_CONFIGS = {
-  biome: ['biome.json', 'biome.jsonc'],
-  eslint: [
-    'eslint.config.js',
-    'eslint.config.mjs',
-    'eslint.config.cjs',
-    'eslint.config.ts',
-    '.eslintrc',
-    '.eslintrc.js',
-    '.eslintrc.json',
-    '.eslintrc.cjs',
-  ],
-  prettier: [
-    '.prettierrc',
-    '.prettierrc.json',
-    '.prettierrc.js',
-    '.prettierrc.cjs',
-    '.prettierrc.yaml',
-    '.prettierrc.yml',
-    'prettier.config.js',
-    'prettier.config.mjs',
-  ],
-  tsc: ['tsconfig.json'],
-  vitest: ['vitest.config.ts', 'vitest.config.js', 'vitest.config.mts', 'vite.config.ts'],
-  jest: ['jest.config.js', 'jest.config.ts', 'jest.config.mjs', 'jest.config.json'],
-  playwright: ['playwright.config.ts', 'playwright.config.js'],
-  tsup: ['tsup.config.ts', 'tsup.config.js', 'tsup.config.mjs'],
-  ruff: ['ruff.toml', '.ruff.toml', 'pyproject.toml'],
-  mypy: ['mypy.ini', '.mypy.ini', 'pyproject.toml', 'setup.cfg'],
-  pytest: ['pytest.ini', 'pyproject.toml', 'setup.cfg', 'tox.ini'],
-  uv: ['pyproject.toml'],
-  semgrep: ['.claudeconf/rules/'],
-};
+/**
+ * Dependabot ecosystems whose cooldown supports `default-days` ONLY — the `semver-*-days` keys
+ * are "Not supported" (GitHub Docs, Dependabot options reference, `cooldown` support table;
+ * YAML values from its `package-ecosystem` table; read 2026-10-13).
+ */
+const SEMVER_COOLDOWN_UNSUPPORTED = new Set([
+  'bazel',
+  'devcontainers',
+  'docker',
+  'docker-compose',
+  'github-actions',
+  'gitsubmodule',
+  'helm',
+  'nix',
+  'opentofu',
+  'pre-commit',
+  'terraform',
+  'vcpkg',
+]);
+
 /** Tools that legitimately have no config file of their own. */
 const NO_CONFIG_TOOLS = new Set([...RUNTIME_VERSIONED, 'build', 'commitlint']);
 
@@ -2908,6 +2076,20 @@ function checkArtifacts(ctx, r, level) {
             { file: updater, line },
           );
         }
+        // A key the SERVICE rejects is not a cooldown — Dependabot rejects the WHOLE file, so
+        // no update of any ecosystem runs (three field repositories had never received one).
+        for (const entry of updates) {
+          const eco = entry?.['package-ecosystem'];
+          const keys = Object.keys(entry?.cooldown ?? {}).filter((k) => /^semver-.*-days$/.test(k));
+          if (typeof eco === 'string' && SEMVER_COOLDOWN_UNSUPPORTED.has(eco) && keys.length) {
+            r.add(
+              'A3',
+              'FAIL',
+              `${updater}: ${keys.join(', ')} under \`${eco}\` — Dependabot does not support SemVer cooldowns for ${eco} and rejects the WHOLE file, so no ecosystem receives updates (keep only default-days there)`,
+              { file: updater, rule: 'A3.keys' },
+            );
+          }
+        }
       }
     }
   }
@@ -2943,10 +2125,15 @@ function checkArtifacts(ctx, r, level) {
   } else {
     const formatTools = toolsOf(milestoneEntries(manifest).format);
     const entries = settingsHookEntries(settings.json, 'PostToolUse');
+    // The rule is that the edit hook RUNS the format tool. A hook that runs a project script
+    // which runs it satisfies that at every profile; reading only the literal command made
+    // four field harnesses fail a rule they keep.
+    const runsFormat = (command) =>
+      formatTools.some(
+        (t) => command.includes(t) || executableText(hookScriptText(ctx, command)).includes(t),
+      );
     const match = entries.find(
-      (e) =>
-        formatTools.some((t) => e.command.includes(t)) ||
-        (level >= 4 && e.marker && e.marker.milestone === 'format'),
+      (e) => runsFormat(e.command) || (level >= 4 && e.marker && e.marker.milestone === 'format'),
     );
     if (match) {
       r.add('A5', 'PASS', `.claude/settings.json: PostToolUse hook runs ${formatTools.join('/')}`, {
@@ -3045,7 +2232,14 @@ function checkArtifacts(ctx, r, level) {
     }
     const script = findScript(root, 'check-suppressions');
     if (script) r.add('A9', 'PASS', `${script}: suppression checker present`, { file: script });
-    else r.add('A9', 'FAIL', 'scripts/check-suppressions.* is missing', { file: 'scripts/' });
+    // Profiles 3–5 named this path only as an example ("e.g."); the gate WIRING is W10's. The
+    // path becomes normative with the vendored bundle (profile 6).
+    else {
+      r.add('A9', 'FAIL', 'scripts/check-suppressions.* is missing', {
+        file: 'scripts/',
+        rule: 'A9.path',
+      });
+    }
   }
 
   // A10 — agent hardening in settings.json
@@ -3213,9 +2407,30 @@ function checkArtifacts(ctx, r, level) {
         r.add('A12', 'UNKNOWN', `${tool}: no config mapping known to this checker`);
         continue;
       }
-      const found = candidates.find(exists);
-      if (found) r.add('A12', 'PASS', `${tool}: config ${found}`, { file: found });
-      else r.add('A12', 'FAIL', `${tool}: no config file (looked for ${candidates.join(', ')})`);
+      // Judged where the harness RUNS the tool (a monorepo runs it from `app/`), accepting a
+      // config there or in any directory above it, as tools look upward; a tool the harness is
+      // never seen running is judged at the root, as before.
+      const dirs = [...toolRunDirs(ctx, tool)].sort();
+      if (!dirs.length) dirs.push('');
+      const found = [];
+      const missing = [];
+      for (const dir of dirs) {
+        const hit = configAtOrAbove(dir, candidates, exists);
+        if (hit) found.push(hit);
+        else missing.push(dir || '.');
+      }
+      const where = dirs.some(Boolean) ? ` (runs in ${dirs.map((d) => d || '.').join(', ')})` : '';
+      if (!missing.length) {
+        r.add('A12', 'PASS', `${tool}: config ${uniq(found).join(', ')}${where}`, {
+          file: found[0],
+        });
+      } else {
+        r.add(
+          'A12',
+          'FAIL',
+          `${tool}: no config file for its run in ${missing.join(', ')} (looked for ${candidates.join(', ')} there and in every directory above it)`,
+        );
+      }
     }
   }
 
@@ -3307,7 +2522,6 @@ function checkDelegationSections(ctx, r) {
       { file },
     );
   }
-
 }
 
 /**
@@ -3331,8 +2545,10 @@ function checkDelegationArbiters(ctx, r) {
   const stale = [...listed].filter((a) => !expected.has(a));
   if (absent.length || stale.length) {
     const parts = [];
-    if (absent.length) parts.push(`declared by the harness but absent from the record: ${quote(absent)}`);
-    if (stale.length) parts.push(`named in the record but not declared by the harness: ${quote(stale)}`);
+    if (absent.length)
+      parts.push(`declared by the harness but absent from the record: ${quote(absent)}`);
+    if (stale.length)
+      parts.push(`named in the record but not declared by the harness: ${quote(stale)}`);
     r.add('D9', 'FAIL', `${file}: arbiter set disagrees with the harness — ${parts.join('; ')}`, {
       file,
     });
@@ -3367,7 +2583,13 @@ function listFilesRecursive(dir, depth = 0) {
   return out;
 }
 
+/** Where a profile-6 harness vendors the bundle's support scripts. */
+const VENDORED_BIN = '.claudeconf/bin';
+
 function findScript(root, stem) {
+  // Profile 6: the vendored bundle (contract §1) — its integrity is A17's to judge.
+  const vendored = `${VENDORED_BIN}/${stem}.mjs`;
+  if (existsSync(join(root, vendored))) return vendored;
   for (const ext of ['mjs', 'js', 'cjs', 'py', 'sh', 'rb', 'ts']) {
     const p = `scripts/${stem}.${ext}`;
     if (existsSync(join(root, p))) return p;
@@ -3534,12 +2756,28 @@ function checkRunnerPinning(ctx, r) {
       file: managedFile,
     });
   }
-  const pin = ctx.manifest?.hookRunner?.version;
-  if (String(merged.min_version ?? '') !== String(pin ?? '')) {
+  const pin = versionOf(ctx, ctx.manifest?.hookRunner);
+  const floor = merged.min_version == null ? null : String(merged.min_version);
+  if (ctx.level >= SINCE['A13.floor']) {
+    // Profile 6: `min_version` is a FLOOR under the resolved pin, not a second copy of it —
+    // an updater bump of the runner moves the lock and leaves the floor valid (contract §2.5).
+    if (!pin || !floor || !isPinnedVersion(floor) || compareVersions(floor, pin) > 0) {
+      r.add(
+        'A13',
+        'FAIL',
+        `merged configuration: min_version ${JSON.stringify(floor)} must be an exact version at or below the resolved runner pin ${JSON.stringify(pin)}`,
+        { file: managedFile, rule: 'A13.floor' },
+      );
+    } else {
+      r.add('A13', 'PASS', `merged configuration: min_version ${floor} ≤ runner ${pin}`, {
+        file: managedFile,
+      });
+    }
+  } else if (String(floor ?? '') !== String(pin ?? '')) {
     r.add(
       'A13',
       'FAIL',
-      `merged configuration: min_version ${JSON.stringify(merged.min_version ?? null)} does not equal manifest hookRunner.version ${JSON.stringify(pin)}`,
+      `merged configuration: min_version ${JSON.stringify(floor)} does not equal manifest hookRunner.version ${JSON.stringify(pin)}`,
       { file: managedFile },
     );
   } else {
@@ -4040,6 +3278,7 @@ function checkWiring(ctx, r, level) {
               'W1',
               inert[0].verdict.status,
               `${tier}.${inert[0].m.name}: wired but inert — ${inert[0].verdict.why}`,
+              { rule: 'W1.inert' },
             );
           } else {
             r.add(
@@ -4053,10 +3292,12 @@ function checkWiring(ctx, r, level) {
             .filter((j) => j.hook === tier)
             .map((j) => j.name)
             .join(', ');
+          // Jobs are found by their §2.4 managed NAMES, which are normative from profile 4.
           r.add(
             'W1',
             'FAIL',
             `${tier}: no job for the ${milestone} milestone (jobs: ${names || 'none'})`,
+            { rule: 'W1.naming' },
           );
         }
       }
@@ -4091,7 +3332,7 @@ function checkWiring(ctx, r, level) {
           'W2',
           b.status,
           `${wf.path}:${b.step.line}: the ${milestone} step "${b.step.name}" cannot run — ${b.why}; a step that is present and never runs is indistinguishable from a deleted one`,
-          { file: wf.path, line: b.step.line },
+          { file: wf.path, line: b.step.line, rule: 'W2.reach' },
         );
       } else if (found.scope === 'outside') {
         r.add(
@@ -4120,8 +3361,11 @@ function checkWiring(ctx, r, level) {
     const missing = required.filter(
       (token) => !gateJobs.some((j) => jobMatchesToken(j.name, token)),
     );
-    if (missing.length) r.add('W3', 'FAIL', `gate: missing job(s) for ${missing.join(', ')}`);
-    else r.add('W3', 'PASS', `gate: ${gateJobs.length} jobs cover the full battery`);
+    if (missing.length) {
+      r.add('W3', 'FAIL', `gate: missing job(s) for ${missing.join(', ')}`, {
+        rule: 'W3.naming',
+      });
+    } else r.add('W3', 'PASS', `gate: ${gateJobs.length} jobs cover the full battery`);
     if (level >= 2) {
       for (const auditor of auditorsOf(manifest)) {
         if (!auditor || typeof auditor.tool !== 'string') continue;
@@ -4139,7 +3383,7 @@ function checkWiring(ctx, r, level) {
   const e2eEntry = milestoneEntries(manifest).e2e;
   const e2eGate = jobs.filter((j) => j.hook === 'gate' && jobMatchesToken(j.name, 'e2e'));
   if (!dump) r.add('W5', 'UNKNOWN', 'merged hook config unavailable');
-  else if (!e2eGate.length) r.add('W5', 'FAIL', 'gate: no e2e job');
+  else if (!e2eGate.length) r.add('W5', 'FAIL', 'gate: no e2e job', { rule: 'W5.naming' });
   else {
     const inert = e2eGate
       .map((j) => ({ j, verdict: inertnessOf(ctx, j.def, { tools: toolsOf(e2eEntry) }) }))
@@ -4149,6 +3393,7 @@ function checkWiring(ctx, r, level) {
         'W5',
         inert.verdict.status,
         `gate.${inert.j.name}: e2e is inert — ${inert.verdict.why}`,
+        { rule: 'W5.inert' },
       );
     } else r.add('W5', 'PASS', 'gate: e2e job present');
   }
@@ -4169,6 +3414,7 @@ function checkWiring(ctx, r, level) {
       r.add('W5', b.status, `${wf.path}:${b.step.line}: the e2e step cannot run — ${b.why}`, {
         file: wf.path,
         line: b.step.line,
+        rule: 'W5.reach',
       });
     } else if (e2eCi.scope === 'none') {
       r.add('W5', 'FAIL', `${wf.path}: no e2e step`, { file: wf.path });
@@ -4208,11 +3454,12 @@ function checkWiring(ctx, r, level) {
           'W9',
           reach.status,
           `${wf.path}:${candidates[0].line}: the ${auditor.tool} step cannot run — ${reach.why}`,
-          { file: wf.path, line: candidates[0].line },
+          { file: wf.path, line: candidates[0].line, rule: 'W9.reach' },
         );
       } else if (!ciStep) {
         r.add('W9', 'FAIL', `${wf.path}: CI auditor ${auditor.tool} is not run in a managed step`, {
           file: wf.path,
+          rule: 'W9.region',
         });
       }
       if (inGate && ciStep) {
@@ -4348,22 +3595,47 @@ function blockedVerdict(found) {
   return { status: worst.reach.status, why: worst.reach.why, step: worst.step };
 }
 
+/** Commands that cannot fail, so `cmd || <one of these>` cannot exit non-zero. */
+const NEVER_FAILS = new Set(['true', ':', 'echo', 'printf']);
+
+/**
+ * Can this hook command never block? The rule (format is advisory, constitution §2) is about
+ * the exit status, not the spelling: `cmd || echo "drift"` is exactly as advisory as
+ * `cmd || true`. Every top-level statement must end in `|| <command that cannot fail>`; one
+ * statement that can fail on its own is enough to block.
+ */
+function cannotBlock(run) {
+  const statements = run
+    .split('\n')
+    .flatMap((line) => splitTopLevel(line, ';'))
+    .map((st) => st.trim())
+    .filter(Boolean);
+  if (!statements.length) return false;
+  return statements.every((st) => {
+    const parts = splitTopLevel(st, '||');
+    if (parts.length < 2) return false;
+    const head = tokenize(parts[parts.length - 1].trim())[0] ?? '';
+    return NEVER_FAILS.has(head);
+  });
+}
+
 function checkFormatAdvisory(ctx, r, level, jobs) {
   const wf = ctx.workflow;
   const gateFormat = jobs.filter((j) => j.hook === 'gate' && jobMatchesToken(j.name, 'format'));
   if (!ctx.dump.dump) {
     r.add('W4', 'UNKNOWN', 'merged hook config unavailable');
   } else if (!gateFormat.length) {
-    r.add('W4', 'FAIL', 'gate: no format job');
+    r.add('W4', 'FAIL', 'gate: no format job', { rule: 'W4.naming' });
   } else {
     for (const job of gateFormat) {
       const run = executableText(jobText(job.def)).trim();
-      if (/\|\|\s*true$/.test(run)) r.add('W4', 'PASS', `gate.${job.name}: advisory (\`|| true\`)`);
+      if (cannotBlock(run))
+        r.add('W4', 'PASS', `gate.${job.name}: advisory (every statement swallowed)`);
       else {
         r.add(
           'W4',
           'FAIL',
-          `gate.${job.name}: \`${run}\` does not end with \`|| true\` — format must never block`,
+          `gate.${job.name}: \`${run}\` can exit non-zero — every statement must end in \`|| true\` (or another command that cannot fail); format must never block`,
         );
       }
     }
@@ -4395,6 +3667,7 @@ function checkFormatAdvisory(ctx, r, level, jobs) {
     r.add('W4', b.status, `${wf.path}:${b.step.line}: the format step cannot run — ${b.why}`, {
       file: wf.path,
       line: b.step.line,
+      rule: 'W4.reach',
     });
   } else if (ci.scope === 'none') {
     r.add('W4', 'FAIL', `${wf.path}: no format step`, { file: wf.path });
@@ -4542,9 +3815,11 @@ function checkSupplyChain(ctx, r) {
         for (const finding of dockerRunIssues(step.run, step.line, wf.lines)) {
           if (managed) managedFindings++;
           else outsideFindings++;
+          // `docker run` digest + version comment: first normative at profile 4 (SINCE).
           record(id, severity, `${wf.path}:${finding.line}: ${finding.message}`, {
             file: wf.path,
             line: finding.line,
+            rule: id === 'W6' ? 'W6.dockerRun' : undefined,
           });
         }
       }
@@ -4613,7 +3888,7 @@ function checkWorkflowHeader(ctx, r) {
         'W7',
         'FAIL',
         `${file}:${dup[1]}: duplicate key — a later job id shadows an earlier (managed) definition`,
-        { file, line: Number(dup[1]) },
+        { file, line: Number(dup[1]), rule: 'W7.header' },
       );
     } else {
       r.add('W7', 'UNKNOWN', `${file}: unparseable (${wf.parseError})`, { file, hard: true });
@@ -4627,7 +3902,7 @@ function checkWorkflowHeader(ctx, r) {
       'W7',
       'FAIL',
       `${file}:${line}: workflow-level \`${key}\` is outside the header allowlist (${[...HEADER_ALLOWLIST].join(', ')}) — it alters managed jobs from outside the block`,
-      { file, line },
+      { file, line, rule: 'W7.header' },
     );
   }
   const perms = wf.doc.permissions;
@@ -4702,11 +3977,12 @@ function checkInfraStep(ctx, r, id, jobName, scriptStem, jobs) {
   const wf = ctx.workflow;
   const gateJob = jobs.find((j) => j.hook === 'gate' && j.name === jobName);
   if (!ctx.dump.dump) r.add(id, 'UNKNOWN', 'merged hook config unavailable');
-  else if (!gateJob) r.add(id, 'FAIL', `gate: no \`${jobName}\` job`);
+  else if (!gateJob) r.add(id, 'FAIL', `gate: no \`${jobName}\` job`, { rule: `${id}.naming` });
   else {
     const inert = inertnessOf(ctx, gateJob.def);
-    if (blocksWiring(inert)) r.add(id, inert.status, `gate.${jobName}: inert — ${inert.why}`);
-    else r.add(id, 'PASS', `gate.${jobName}: present`);
+    if (blocksWiring(inert)) {
+      r.add(id, inert.status, `gate.${jobName}: inert — ${inert.why}`, { rule: `${id}.inert` });
+    } else r.add(id, 'PASS', `gate.${jobName}: present`);
   }
   if (!wf.exists || !wf.doc) {
     r.add(
@@ -4735,10 +4011,13 @@ function checkInfraStep(ctx, r, id, jobName, scriptStem, jobs) {
       id,
       reach.status,
       `${wf.path}:${candidates[0].line}: the ${scriptStem} step cannot run — ${reach.why}`,
-      { file: wf.path, line: candidates[0].line },
+      { file: wf.path, line: candidates[0].line, rule: `${id}.reach` },
     );
   } else {
-    r.add(id, 'FAIL', `${wf.path}: no managed CI step running ${scriptStem}`, { file: wf.path });
+    r.add(id, 'FAIL', `${wf.path}: no managed CI step running ${scriptStem}`, {
+      file: wf.path,
+      rule: `${id}.region`,
+    });
   }
 }
 
@@ -4889,119 +4168,6 @@ function resolveCiProjectCheck(ctx, r, name, run, level) {
   reportRunMatch(r, `${name}@ci`, command, run, { file: wf.path, line });
 }
 
-/**
- * Is `needle` present in an EXECUTED position of `command`? Comments and statically dead
- * constructs do not count; a command that cannot be resolved statically returns null.
- */
-
-/** Index ranges of `text` that sit inside a single- or double-quoted shell string. */
-function quotedRanges(text) {
-  const ranges = [];
-  let quote = null;
-  let start = 0;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    // Inside double quotes a backslash escapes the next character; single quotes have no
-    // escapes in POSIX shells. Getting this wrong would let an escaped quote end a string
-    // early and report a QUOTED needle as executed.
-    if (quote === '"' && c === '\\') {
-      i++;
-      continue;
-    }
-    if (quote) {
-      if (c === quote) {
-        ranges.push([start, i + 1]);
-        quote = null;
-      }
-    } else if (c === '"' || c === "'") {
-      quote = c;
-      start = i;
-    }
-  }
-  return ranges;
-}
-
-/**
- * Is `needle` present in an EXECUTED position of `command`? A match inside a comment or a
- * statically dead construct does not count, and a match that only ever appears inside a QUOTED
- * STRING (`echo "scripts/check.sh is disabled"`, `bash -c "…"`) is not shown to execute either:
- * that returns null (UNVERIFIED), which an enforcing run fails. Returns true / false / null.
- */
-
-/**
- * The statements a command actually EXECUTES, decided by the parsed structure rather than by
- * counting keywords. A branch under a statically false condition is dropped; the `else` branch
- * of that same conditional is kept, because it is the one that runs. Throws `Unresolved` when
- * the structure cannot be read — the caller reports UNKNOWN rather than guessing which lines
- * execute, since in a report a guess is indistinguishable from a verified answer.
- */
-const STATICALLY_FALSE = /^(false|\[\s*0\s*-eq\s*1\s*\]|\[\[\s*0\s*-eq\s*1\s*\]\])\s*$/;
-
-function liveStatements(command) {
-  const out = [];
-  const walk = (nodes) => {
-    for (const node of nodes) {
-      if (node.type === 'simple') {
-        out.push(node.text);
-        continue;
-      }
-      if (node.type === 'if') {
-        walk(node.cond);
-        const condText = node.cond
-          .map((n) => (n.type === 'simple' ? n.text : ''))
-          .join(' ')
-          .trim();
-        const deadThen = STATICALLY_FALSE.test(condText);
-        for (const branch of node.branches) {
-          if (deadThen && branch.kind === 'then') continue;
-          if (branch.cond) walk(branch.cond);
-          walk(branch.body);
-        }
-        continue;
-      }
-      walk(node.cond ?? []);
-      walk(node.body ?? []);
-    }
-  };
-  walk(parseCommand(command));
-  return out;
-}
-
-/**
- * Is `needle` present in an EXECUTED position of `command`? A match inside a comment or a
- * statically dead branch does not count, and a match that only ever appears inside a QUOTED
- * STRING (`echo "scripts/check.sh is disabled"`, `bash -c "…"`) is not shown to execute
- * either. Returns true / false / null, where null is UNVERIFIED and an enforcing run fails it.
- */
-function runContains(command, needle) {
-  if (!needle) return false;
-  const text = String(command ?? '');
-  if (!text.trim()) return false;
-  let joined;
-  try {
-    joined = liveStatements(text).join('\n');
-  } catch (e) {
-    if (e instanceof Unresolved) return null;
-    throw e;
-  }
-  if (!joined.includes(needle)) {
-    // The needle may still be present in text this reader dropped as dead; saying "absent"
-    // is only honest when the whole command was readable, which it was.
-    return false;
-  }
-  const quoted = quotedRanges(joined);
-  let unquoted = false;
-  for (let i = joined.indexOf(needle); i !== -1; i = joined.indexOf(needle, i + 1)) {
-    const end = i + needle.length;
-    if (!quoted.some(([a, b]) => i >= a && end <= b)) {
-      unquoted = true;
-      break;
-    }
-  }
-  if (!unquoted) return null;
-  return true;
-}
-
 /** Reachability of a CI job/step for the authoritative pull-request event (spec §5 R-I3). */
 
 /**
@@ -5096,6 +4262,7 @@ const FROZEN_RX = [
   {
     rx: /\bpip install\b[^\n]*-r\b(?!.*--require-hashes)/,
     why: '`pip install -r` without `--require-hashes`',
+    rule: 'W14.pipHashes',
   },
 ];
 const NPX_RX = /(^|[\s;&|(])npx\s|\bnpm\s+exec\b/;
@@ -5111,18 +4278,22 @@ function checkCommandHygiene(ctx, r, level) {
     if (FETCH_RX.test(text)) {
       fetch++;
       const at = matchLineOf(text, FETCH_RX, src.line, lines);
+      // Hooks were bound by this rule from profile 2; CI steps and agent-settings hooks from 4
+      // (the profile-2 CI template itself prescribed `pipx run`).
       r.add('W13', 'FAIL', `${src.where}: fetches tooling at execution time — \`${at.text}\``, {
         file: src.file,
         line: at.line,
+        rule: src.kind === 'hook' ? undefined : 'W13.ci',
       });
     }
-    for (const { rx, why } of FROZEN_RX) {
+    for (const { rx, why, rule } of FROZEN_RX) {
       if (rx.test(text)) {
         frozen++;
         const at = matchLineOf(text, rx, src.line, lines);
         r.add('W14', 'FAIL', `${src.where}: ${why} — \`${at.text}\``, {
           file: src.file,
           line: at.line,
+          rule,
         });
         break;
       }
@@ -5158,6 +4329,7 @@ function commandSources(ctx) {
         const line = findLine(layer.lines, (l) => l.includes(firstLine(run).trim()));
         if (layer === ctx.rootHook && ctx.level >= 4 && !inRegion(layer, line)) continue;
         out.push({
+          kind: 'hook',
           where: `${layer.path}:${line} ${hook}.${job.name ?? '?'}`,
           text: run,
           file: layer.path,
@@ -5171,6 +4343,7 @@ function commandSources(ctx) {
     const command = step.run || (typeof step.with.args === 'string' ? step.with.args : '');
     if (!command) continue;
     out.push({
+      kind: 'ci',
       where: `${ctx.workflow.path}:${step.line} step "${step.name || step.uses}"`,
       text: command,
       file: ctx.workflow.path,
@@ -5183,6 +4356,7 @@ function commandSources(ctx) {
       for (const entry of settingsHookEntries(ctx.settings.json, event)) {
         if (!entry.command) continue;
         out.push({
+          kind: 'settings',
           where: `.claude/settings.json ${event} hook`,
           text: entry.command,
           file: '.claude/settings.json',
@@ -5237,7 +4411,7 @@ function checkTriggers(ctx, r) {
         'W16',
         'FAIL',
         `${file}:${onLine}: the pull_request trigger excludes the ${branchNote}`,
-        { file, line: onLine },
+        { file, line: onLine, rule: 'W16.narrowing' },
       );
     }
     const types = Array.isArray(pr.types) ? pr.types : null;
@@ -5248,7 +4422,7 @@ function checkTriggers(ctx, r) {
           'W16',
           'FAIL',
           `${file}:${onLine}: pull_request types ${JSON.stringify(types)} omit ${missing.join(', ')} — no pre-merge signal`,
-          { file, line: onLine },
+          { file, line: onLine, rule: 'W16.narrowing' },
         );
       }
     }
@@ -5257,7 +4431,7 @@ function checkTriggers(ctx, r) {
         'W16',
         'FAIL',
         `${file}:${onLine}: the pull_request trigger carries a paths filter — the check silently does not run for some changes`,
-        { file, line: onLine },
+        { file, line: onLine, rule: 'W16.narrowing' },
       );
     }
   }
@@ -5271,12 +4445,14 @@ function checkTriggers(ctx, r) {
       r.add('W16', 'FAIL', `${file}:${onLine}: the push trigger excludes the ${branchNote}`, {
         file,
         line: onLine,
+        rule: 'W16.narrowing',
       });
     }
     if (push.paths || push['paths-ignore']) {
       r.add('W16', 'FAIL', `${file}:${onLine}: the push trigger carries a paths filter`, {
         file,
         line: onLine,
+        rule: 'W16.narrowing',
       });
     }
   }
@@ -5541,11 +4717,13 @@ function checkGateEquivalence(ctx, r, level, jobs) {
     const pair = `${milestone}: gate [${gateText}] vs ci [${ciText}]`;
 
     if (!ctx.dump.dump) {
-      r.add('W17', 'UNKNOWN', `${milestone}: merged hook config unavailable — ${pair}`);
+      r.add('W17', 'UNKNOWN', `${milestone}: merged hook config unavailable — ${pair}`, {
+        rule: 'W17',
+      });
       continue;
     }
     if (!gateCommands.length || !ciCommands.length) {
-      r.add('W17', 'FAIL', `${pair} — a tier has no command`);
+      r.add('W17', 'FAIL', `${pair} — a tier has no command`, { rule: 'W17' });
       continue;
     }
     const gateTools = matchedTools(ctx, gateCommands, required);
@@ -5565,7 +4743,7 @@ function checkGateEquivalence(ctx, r, level, jobs) {
           'W17',
           'UNKNOWN',
           `${pair} — the tool could not be identified in ${unidentified.map((c) => `\`${firstLine(c).trim()}\``).join(', ')}, so gate ≡ CI cannot be established`,
-          { file: wf.path },
+          { file: wf.path, rule: 'W17' },
         );
         continue;
       }
@@ -5573,19 +4751,19 @@ function checkGateEquivalence(ctx, r, level, jobs) {
         'W17',
         'FAIL',
         `${pair} — gate references {${gateTools.tools.join(',')}}, CI references {${ciTools.tools.join(',')}}, manifest records {${required.join(',')}}`,
-        { file: wf.path },
+        { file: wf.path, rule: 'W17' },
       );
       continue;
     }
     const verdicts = [...gateTools.work, ...ciTools.work];
     const failed = verdicts.find((v) => v.status === 'FAIL');
     if (failed) {
-      r.add('W17', 'FAIL', `${pair} — ${failed.why}`, { file: wf.path });
+      r.add('W17', 'FAIL', `${pair} — ${failed.why}`, { file: wf.path, rule: 'W17' });
       continue;
     }
     const unknown = verdicts.find((v) => v.status === 'UNKNOWN');
     if (unknown) {
-      r.add('W17', 'UNKNOWN', `${pair} — ${unknown.why}`, { file: wf.path });
+      r.add('W17', 'UNKNOWN', `${pair} — ${unknown.why}`, { file: wf.path, rule: 'W17' });
       continue;
     }
     r.add('W17', 'PASS', pair, { file: wf.path });
@@ -5655,7 +4833,7 @@ function assertionRunners(ctx) {
 
 function checkDrift(ctx, r, level) {
   const { root, manifest } = ctx;
-  const pins = manifestPins(manifest);
+  const pins = manifestPins(ctx);
   const wf = ctx.workflow;
   /** tool → where its pin was reconciled, so D1 can tell "no lockfile" from "unreconciled". */
   const reconciled = new Map();
@@ -5664,7 +4842,13 @@ function checkDrift(ctx, r, level) {
   const assertPath = findScript(root, 'assert-tool-versions') ?? 'scripts/assert-tool-versions.sh';
   const assertRead = safeRead(join(root, assertPath)).text;
   const assertText = assertRead === null ? null : liveScriptLines(assertRead);
-  if (assertText === null) {
+  if (assertText !== null && assertPath.startsWith(`${VENDORED_BIN}/`)) {
+    // The vendored assertion carries no literals to drift: it resolves every pin from the
+    // manifest at run time, and A17 vouches that the script is the bundle's.
+    r.add('D2', 'PASS', `${assertPath}: the vendored assertion reads every pin from the manifest`, {
+      file: assertPath,
+    });
+  } else if (assertText === null) {
     // A MISSING control is a failure, not a note. Deleting `check-suppressions.mjs` FAILs A9
     // and `check-project-checks.mjs` FAILs A11; this one degraded to INFO while the gate job
     // that EXECUTES it still passed W3 — wired, unrunnable, and reported conforming. Two
@@ -5676,14 +4860,16 @@ function checkDrift(ctx, r, level) {
         'D2',
         'FAIL',
         `${assertPath}: not present, but ${runsIt.join(', ')} runs it — the check is wired and cannot run`,
-        { file: assertPath },
+        { file: assertPath, rule: 'D2.path' },
       );
-    } else if (pins.size) {
+    } else if (pins.length) {
       r.add(
         'D2',
         'FAIL',
-        `${assertPath}: not present, and the manifest records ${pins.size} pinned tool(s) that nothing asserts at run time (contract §3.4)`,
-        { file: assertPath },
+        `${assertPath}: not present, and the manifest records ${pins.length} pinned tool(s) that nothing asserts at run time (contract §3.4)`,
+        // Located by NAME, which no profile before 6 made normative (a harness may assert under
+        // any name — `check-tool-versions.sh` in the field); the vendored bundle fixes it at 6.
+        { file: assertPath, rule: 'D2.path' },
       );
     } else {
       r.add('D2', 'INFO', `${assertPath}: not present, and nothing records or runs it`, {
@@ -5731,7 +4917,14 @@ function checkDrift(ctx, r, level) {
   const provRead = safeRead(join(root, provPath)).text;
   const provText = provRead === null ? null : liveScriptLines(provRead);
   const versionSources = [];
-  if (provText !== null) versionSources.push({ path: provPath, text: provText });
+  const provVendored = provText !== null && provPath.startsWith(`${VENDORED_BIN}/`);
+  if (provVendored) {
+    // The vendored provisioner installs from `.claudeconf/tools.lock.json`, the pins' own
+    // source; it has no version of its own to drift (A17 vouches for the script).
+    r.add('D3', 'PASS', `${provPath}: the vendored provisioner reads .claudeconf/tools.lock.json`, {
+      file: provPath,
+    });
+  } else if (provText !== null) versionSources.push({ path: provPath, text: provText });
   else r.add('D3', 'INFO', `${provPath}: not present`, { file: provPath });
   for (const src of commandSources(ctx)) {
     versionSources.push({ path: src.where, text: executableText(src.text) });
@@ -5756,7 +4949,7 @@ function checkDrift(ctx, r, level) {
     }
   }
   if (checkedVars) r.add('D3', 'PASS', `${checkedVars} *_VERSION assignment(s) match the manifest`);
-  else if (provText !== null)
+  else if (provText !== null && !provVendored)
     r.add('D3', 'UNKNOWN', `${provPath}: no *_VERSION assignment maps to a manifest tool`, {
       file: provPath,
     });
@@ -5813,7 +5006,8 @@ function checkDrift(ctx, r, level) {
   ];
   let auditorHits = 0;
   for (const auditor of auditorsOf(manifest)) {
-    if (!auditor || typeof auditor.tool !== 'string' || !isPinnedVersion(auditor.version)) continue;
+    const pinned = versionOf(ctx, auditor);
+    if (!auditor || typeof auditor.tool !== 'string' || !isPinnedVersion(pinned)) continue;
     for (const src of auditorText) {
       const rx = new RegExp(
         `\\b${escapeRx(auditor.tool)}\\b[^\\n]{0,80}?([0-9]+\\.[0-9]+\\.[0-9]+)`,
@@ -5821,11 +5015,11 @@ function checkDrift(ctx, r, level) {
       );
       for (const m of src.text.matchAll(rx)) {
         auditorHits++;
-        if (m[1] !== auditor.version) {
+        if (m[1] !== pinned) {
           r.add(
             'D5',
             'FAIL',
-            `${src.where}: ${auditor.tool} ${m[1]} but ci.auditors pins ${auditor.version}`,
+            `${src.where}: ${auditor.tool} ${m[1]} but ci.auditors pins ${pinned}`,
             { file: src.where.split(':')[0] },
           );
         }
@@ -5862,7 +5056,17 @@ function checkLockfileReconciliation(ctx, r, pins, reconciled) {
       hard: true,
     });
   }
-  for (const [tool, version] of pins) {
+  for (const [tool, version, rec] of pins) {
+    // A typed pin IS a reference into its lock (contract §2.5): resolving it is the
+    // reconciliation, and a pin that does not resolve is unreconciled by definition.
+    if (rec?.form === 'pin') {
+      if (rec.error) {
+        r.add('D1', 'FAIL', `${tool}: pin does not resolve — ${rec.error.why}`);
+      } else {
+        r.add('D1', 'PASS', `${tool} ${version}: pinned by ${rec.provenance}`);
+      }
+      continue;
+    }
     if (version === 'n/a') continue;
     let compared = false;
     if (stacks.includes('node') && NODE_PACKAGES[tool] && lockNode) {
@@ -5905,6 +5109,7 @@ function checkLockfileReconciliation(ctx, r, pins, reconciled) {
         'D1',
         'UNKNOWN',
         `${tool}: the pin ${version} is reconciled NOWHERE — no lockfile entry, no version assertion, no provisioning variable, no image digest comment`,
+        { rule: 'D1.unreconciled' },
       );
     }
   }
@@ -5914,21 +5119,75 @@ function managedText(wf) {
   return wf.regions.map((region) => region.body).join('\n');
 }
 
-function manifestPins(manifest) {
-  const pins = [];
-  for (const entry of Object.values(milestoneEntries(manifest))) {
-    if (Array.isArray(entry?.tools)) {
-      for (const t of entry.tools) if (t?.tool) pins.push([t.tool, t.version]);
-    } else if (entry?.tool) {
-      pins.push([entry.tool, entry.version]);
+/**
+ * Every version the manifest names, resolved ONCE (contract §2.5). A literal `version` is taken
+ * as written (the profile ≤5 form); a typed `pin` is resolved through harness/lib/pins.mjs —
+ * the same resolver every vendored script imports. Every version-reading check reads from
+ * here, so no two checks can disagree about a tool's version.
+ */
+function resolveManifestPins(ctx) {
+  const m = ctx.manifest;
+  const runtimes = m?.runtimes && typeof m.runtimes === 'object' ? m.runtimes : {};
+  const records = [];
+  const add = (where, tool, holder) => {
+    if (!holder || typeof holder !== 'object') return;
+    if (holder.pin !== undefined) {
+      const res = resolvePin(ctx.root, holder.pin, { runtimes });
+      records.push({
+        where,
+        tool,
+        holder,
+        form: 'pin',
+        version: res.ok ? res.version : null,
+        provenance: res.ok ? res.provenance : null,
+        error: res.ok ? null : res,
+      });
+    } else {
+      const version = typeof holder.version === 'string' ? holder.version : null;
+      records.push({
+        where,
+        tool,
+        holder,
+        form: 'literal',
+        version,
+        provenance: null,
+        error: null,
+      });
     }
+  };
+  for (const [key, entry] of Object.entries(milestoneEntries(m))) {
+    if (Array.isArray(entry?.tools)) {
+      for (const t of entry.tools) add(`milestones.${key}`, t?.tool, t);
+    } else add(`milestones.${key}`, entry?.tool, entry);
   }
-  for (const a of auditorsOf(manifest)) if (a?.tool) pins.push([a.tool, a.version]);
-  const hr = manifest?.hookRunner;
-  if (hr?.name) pins.push([hr.name, hr.version]);
-  return pins;
+  for (const [i, a] of auditorsOf(m).entries()) add(`ci.auditors[${i}]`, a?.tool, a);
+  if (m?.hookRunner && typeof m.hookRunner === 'object') {
+    add('hookRunner', m.hookRunner.name, m.hookRunner);
+  }
+  for (const [name, pin] of Object.entries(runtimes)) add(`runtimes.${name}`, name, { pin });
+  return records;
 }
 
+/** The resolution record for THIS manifest object (by identity, not by tool name). */
+function pinRecordOf(ctx, holder) {
+  return (ctx.pinRecords ?? []).find((rec) => rec.holder === holder) ?? null;
+}
+
+/** A holder's version — the literal, or its resolved pin; null when a pin does not resolve. */
+function versionOf(ctx, holder) {
+  const rec = pinRecordOf(ctx, holder);
+  if (rec) return rec.version;
+  return typeof holder?.version === 'string' ? holder.version : null;
+}
+
+/** `[tool, version, record]` for every tool pin (runtimes excluded), resolved. */
+function manifestPins(ctx) {
+  return (ctx.pinRecords ?? [])
+    .filter((rec) => !rec.where.startsWith('runtimes.') && rec.tool)
+    .map((rec) => [rec.tool, rec.version, rec]);
+}
+
+/** Numeric comparison of dotted versions (pre-release suffixes ignored). */
 function lookupPin(pins, tool) {
   const target = norm(tool);
   for (const [name, version] of pins) if (norm(name) === target) return version;
@@ -5992,6 +5251,323 @@ function checkShim(ctx, r, level) {
   }
 }
 
+/**
+ * The body of the PROJECT script an agent-settings hook command runs — `bash scripts/x.sh`,
+ * `sh ./x.sh`, `bash "$CLAUDE_PROJECT_DIR/x.sh"`, or the script path alone — or '' when the
+ * command does not name a readable script inside the root. Evidence for "does this hook run
+ * tool T", never an execution.
+ */
+function hookScriptText(ctx, command) {
+  const m = String(command ?? '')
+    .trim()
+    .match(
+      /^(?:(?:ba|z)?sh\s+)?"?(?:\$\{?CLAUDE_PROJECT_DIR\}?\/)?(?:\.\/)?([\w./-]+\.(?:sh|bash))"?(?:\s|$)/,
+    );
+  if (!m) return '';
+  const target = resolve(ctx.root, m[1]);
+  if (!isInside(ctx.root, target)) return '';
+  return safeRead(target).text ?? '';
+}
+
+// ---------------------------------------------------------------------------------------
+// A17 — the vendored support-script bundle (contract §1, profile 6, PLAN.md AD2)
+// ---------------------------------------------------------------------------------------
+
+const BUNDLE_DIR = dirname(fileURLToPath(import.meta.url));
+
+/** The bundle catalog THIS checker ships, and the harness version it carries. */
+function bundleCatalog() {
+  const catalog = readJson(join(BUNDLE_DIR, 'harness-catalog.json')) ?? {};
+  const current = safeRead(join(BUNDLE_DIR, 'harness', 'VERSION')).text?.trim() ?? null;
+  return { catalog, current };
+}
+
+/**
+ * A consumer's `.claudeconf/bin/` is judged against the catalog the CHECKER ships for the
+ * declared version — never against hashes the consumer could edit next to the files. The file
+ * set must be EXACT: a missing, extra, edited or symlinked entry fails, and so does a managed
+ * directory whose declaration was removed (that would be the cheapest way to escape the check).
+ */
+function checkVendoredBundle(ctx, r, level) {
+  const binRel = '.claudeconf/bin';
+  const bin = join(ctx.root, binRel);
+  const file = ctx.manifestPath;
+  const declared = ctx.manifest?.harnessScripts;
+  const hasBin = existsSync(bin);
+  if (!hasBin && declared === undefined) {
+    if (level >= SINCE.A17) {
+      r.add(
+        'A17',
+        'FAIL',
+        `${binRel}: missing — profile 6 vendors the support scripts from the bundle and records \`harnessScripts\` (contract §1)`,
+        { file: binRel },
+      );
+    }
+    return;
+  }
+  if (declared === undefined) {
+    r.add(
+      'A17',
+      'FAIL',
+      `${binRel} exists but ${file} records no \`harnessScripts\` — a managed path cannot drop its declaration to escape its integrity check`,
+      { file },
+    );
+    return;
+  }
+  const version = declared?.version;
+  const { catalog, current } = bundleCatalog();
+  if (typeof version !== 'string' || !catalog[version]) {
+    r.add(
+      'A17',
+      'FAIL',
+      `${file}: harnessScripts.version ${JSON.stringify(version)} is not a released bundle version (${Object.keys(catalog).join(', ') || 'catalog unreadable'})`,
+      { file },
+    );
+    return;
+  }
+  if (!hasBin) {
+    r.add('A17', 'FAIL', `${binRel}: missing, though ${file} declares bundle ${version}`, {
+      file: binRel,
+    });
+    return;
+  }
+  if (lstatSync(bin).isSymbolicLink()) {
+    r.add('A17', 'FAIL', `${binRel} is a symlink — the vendored bundle must be real files`, {
+      file: binRel,
+    });
+    return;
+  }
+  const tree = hashTree(bin);
+  const { missing, extra, edited } = compareToEntry(tree.files, catalog[version]);
+  const problems = [
+    ...tree.problems.map((p) => `${binRel}/${p}`),
+    ...missing.map((f) => `${binRel}/${f}: missing (bundle ${version} ships it)`),
+    ...extra.map((f) => `${binRel}/${f}: not part of bundle ${version}`),
+    ...edited.map((f) => `${binRel}/${f}: edited after vendoring (differs from bundle ${version})`),
+  ];
+  for (const p of problems) r.add('A17', 'FAIL', p, { file: binRel });
+  if (!problems.length) {
+    r.add(
+      'A17',
+      'PASS',
+      `${binRel}: ${Object.keys(tree.files).length} files identical to bundle ${version}`,
+      { file: binRel },
+    );
+  }
+  if (current && version !== current) {
+    r.add(
+      'A17',
+      'INFO',
+      `${binRel}: bundle ${version} is behind this checker's ${current} — re-vendor it (refresh)`,
+      { file: binRel },
+    );
+  }
+  if (level >= SINCE['A17.callers']) checkBundleCallers(ctx, r, catalog[version]);
+}
+
+/**
+ * Profile 6: the harness must EXECUTE the copy A17 verified. A pristine `.claudeconf/bin/`
+ * proves nothing while the gate calls a mutable script of the same name elsewhere, or while
+ * the gate's secret scan bypasses `scan-tree.mjs` and reads the working directory again — W10,
+ * W11 and D2 find their callers by NAME, so this is where the PATH is held to the vendored one.
+ * Every invocation of a bundle script, under any extension or directory, must be exactly
+ * `.claudeconf/bin/<script>.mjs`: a nested `.claudeconf/bin/` elsewhere is a copy A17 never
+ * reads.
+ */
+function checkBundleCallers(ctx, r, entry) {
+  const binRel = '.claudeconf/bin';
+  const stems = Object.keys(entry)
+    .filter((f) => !f.includes('/') && f.endsWith('.mjs'))
+    .map((f) => f.slice(0, -'.mjs'.length));
+  // A path token starts where a shell word can (start, whitespace, a quote, an operator, a
+  // substitution) and ends where no path character follows — so `…mjs>/dev/null` and
+  // `$(node …)` are read, and `mycheck-suppressions.mjs` is not mistaken for the bundle's. A
+  // path straight after a redirection (`> out/check-suppressions.mjs`) is a file being written
+  // or read, not a program being run, so it is not an invocation.
+  const word = '\\s\'"=;&|()`';
+  const invokes = new RegExp(
+    `(?<![^${word}])(?<![<>]\\s*)((?:[^${word}<>]*/)?(${stems.map(escapeRx).join('|')})\\.(?:mjs|cjs|js|ts|sh|bash|py))(?![\\w.-])`,
+    'gm',
+  );
+  let callers = 0;
+  let wrong = 0;
+  for (const src of commandSources(ctx)) {
+    for (const m of executableText(src.text).matchAll(invokes)) {
+      callers++;
+      if (m[1].replace(/^\.\//, '') === `${binRel}/${m[2]}.mjs`) continue;
+      wrong++;
+      r.add(
+        'A17',
+        'FAIL',
+        `${src.where}: runs ${m[1]} — profile 6 runs the vendored ${binRel}/${m[2]}.mjs, the copy A17 verifies, and no other`,
+        { file: src.file, line: src.line, rule: 'A17.callers' },
+      );
+    }
+  }
+  const dump = ctx.dump?.dump;
+  if (!dump) {
+    r.add(
+      'A17',
+      'UNKNOWN',
+      `merged hook config unavailable — cannot establish that the gate's secret scan runs through ${binRel}/scan-tree.mjs`,
+      { rule: 'A17.callers' },
+    );
+    return;
+  }
+  const scans = mergedJobs(dump).filter(
+    (j) => j.hook === 'gate' && jobMatchesToken(j.name, 'secret-scan'),
+  );
+  const throughTree = new RegExp(
+    `(?:^|[\\s'"])(?:\\./)?${escapeRx(binRel)}/scan-tree\\.mjs(?:\\s+--root\\s+\\S+)?\\s+--\\s`,
+  );
+  for (const job of scans) {
+    if (throughTree.test(executableText(jobText(job.def)))) continue;
+    wrong++;
+    r.add(
+      'A17',
+      'FAIL',
+      `gate.${job.name}: the whole-tree secret scan does not run through ${binRel}/scan-tree.mjs — it reads the working directory, whose ignored and untracked files CI never sees (contract §2.5)`,
+      { rule: 'A17.callers' },
+    );
+  }
+  if (!wrong) {
+    r.add(
+      'A17',
+      'PASS',
+      `${callers} hook/CI invocation(s) of the bundle run ${binRel}; the gate's secret scan (${scans.length} job(s)) runs through scan-tree.mjs`,
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------------------
+// W21 — a required check cannot be skipped on a bot or fork pull request (profile 6, AD9)
+// ---------------------------------------------------------------------------------------
+
+/**
+ * The body of every `${{ … }}` in `text`, read to its REAL end: a `}}` inside a single-quoted
+ * string (`format('{{0}}', …)`, with `''` as the escaped quote) does not close the expression.
+ * An unterminated expression runs to the end of the text rather than being dropped.
+ */
+function githubExpressions(text) {
+  const s = String(text);
+  const out = [];
+  let at = s.indexOf('${{');
+  while (at !== -1) {
+    let i = at + 3;
+    let quoted = false;
+    for (; i < s.length; i++) {
+      if (s[i] === "'") {
+        if (quoted && s[i + 1] === "'") i++;
+        else quoted = !quoted;
+      } else if (!quoted && s[i] === '}' && s[i + 1] === '}') break;
+    }
+    out.push(s.slice(at + 3, i));
+    at = s.indexOf('${{', i + 2);
+  }
+  return out;
+}
+
+/**
+ * Every use of the `secrets` context in the GitHub expressions of `text`, other than the token
+ * GitHub gives every run (bots and forks included): `secrets.NAME`, `secrets['NAME']`, and any
+ * other use — `toJSON(secrets)`, a computed index — which hands over secrets no bot or fork run
+ * receives. Contexts and property names are case-insensitive, so the exemption is too.
+ */
+function secretRefs(text) {
+  const refs = [];
+  for (const raw of githubExpressions(text)) {
+    // A string literal is data, not a context access — except the name inside `secrets['…']`.
+    const expr = raw.replace(/'(?:[^']|'')*'/g, (lit, at) =>
+      /secrets\s*\[\s*$/i.test(raw.slice(0, at)) ? lit : "''",
+    );
+    const uses = expr.matchAll(
+      /(?<![.\w-])secrets\b(?:\s*\.\s*([A-Za-z_][\w-]*)|\s*\[\s*\\?['"]([^'"\\]+)\\?['"]\s*\])?/gi,
+    );
+    for (const m of uses) {
+      const name = m[1] ?? m[2];
+      if (name?.toUpperCase() === 'GITHUB_TOKEN') continue;
+      refs.push(name ? `secrets.${name}` : `the whole secrets context (\`${expr.trim()}\`)`);
+    }
+  }
+  return uniq(refs);
+}
+
+/**
+ * A required CI step — one answering a milestone or a declared project check — and its job must
+ * run on EVERY pull request. Dependabot and fork runs get no repository secrets, and a step
+ * conditioned on the actor or on a secret is simply skipped there, which GitHub reports as a
+ * green check: the check is "present" and nothing ran. Actor identity is also spoofable, so it
+ * may select ancillary behaviour but never whether a required check runs.
+ */
+function checkBotSafeRequiredSteps(ctx, r, level) {
+  const wf = ctx.workflow;
+  if (!wf.exists || !wf.doc) return; // W2/W7 report the workflow itself
+  const targets = [];
+  for (const milestone of MILESTONES) {
+    const entry = milestoneEntries(ctx.manifest)[milestone];
+    if (!entry || !tiersOf(entry).includes('ci')) continue;
+    // BLOCKED steps included: a step reachability cannot show to run is exactly the step a
+    // condition can skip — W2 says it may not run, W21 says why that is not acceptable.
+    const found = findCiSteps(ctx, milestone, level);
+    for (const step of [...(found.steps ?? []), ...(found.blocked ?? []).map((b) => b.step)]) {
+      targets.push({ label: `the ${milestone} step`, step });
+    }
+  }
+  for (const pc of projectChecksOf(ctx.manifest) ?? []) {
+    if (!Array.isArray(pc?.tiers) || !pc.tiers.includes('ci')) continue;
+    const job = wf.jobs.find((j) => j.id === pc.name);
+    const named = wf.jobs.flatMap((j) => j.steps).find((st) => st.name === pc.name);
+    const step = named ?? (job ? job.steps.find((st) => stepCommand(st)) : null);
+    if (step) targets.push({ label: `project check ${pc.name}`, step });
+  }
+  let findings = 0;
+  const seen = new Set();
+  for (const { label, step } of targets) {
+    const raw = step.job?.def?.steps?.[step.index] ?? {};
+    for (const [scope, cond] of [
+      ['step', step.if],
+      ['job', step.job?.def?.if],
+    ]) {
+      if (cond === undefined || cond === null) continue;
+      const text = String(cond)
+        .replace(/^\$\{\{\s*|\s*\}\}$/g, '')
+        .trim();
+      if (/^(always|success)\(\)$/.test(text)) continue;
+      const key = `${scope}:${scope === 'job' ? step.job.id : step.line}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      findings++;
+      r.add(
+        'W21',
+        'FAIL',
+        `${wf.path}:${scope === 'job' ? step.job.line : step.line}: ${label} runs under its ${scope}'s \`if: ${cond}\` — a condition can skip a required check, and a skipped check reports green (bot and fork PRs)`,
+        { file: wf.path, line: step.line },
+      );
+    }
+    const text = [step.run, raw.with, raw.env, step.job?.def?.env]
+      .map((v) => (typeof v === 'string' ? v : JSON.stringify(v ?? '')))
+      .join('\n');
+    const refs = secretRefs(text);
+    if (refs.length) {
+      findings++;
+      r.add(
+        'W21',
+        'FAIL',
+        `${wf.path}:${step.line}: ${label} needs ${refs.join(', ')} — Dependabot and fork runs get no repository secrets, so it cannot pass there; move the work that needs it into an ancillary step`,
+        { file: wf.path, line: step.line },
+      );
+    }
+  }
+  if (!findings && targets.length) {
+    r.add(
+      'W21',
+      'PASS',
+      `${wf.path}: ${targets.length} required CI step(s) run unconditionally and without repository secrets`,
+      { file: wf.path },
+    );
+  }
+}
+
 function checkCodeowners(ctx, r) {
   const file = '.github/CODEOWNERS';
   const read = safeRead(join(ctx.root, file));
@@ -6012,7 +5588,7 @@ function checkCodeowners(ctx, r) {
         'D7',
         'FAIL',
         `${file}: ${path} is only covered by the catch-all \`${effective ? effective.pattern : '*'}\` — a control-plane path needs its own ownership entry`,
-        { file },
+        { file, rule: 'D7.catchAll' },
       );
     } else {
       owned++;
@@ -6075,7 +5651,26 @@ function controlPlanePaths(ctx) {
 
 function checkRunnerVersion(ctx, r) {
   const runner = ctx.runner;
-  const pin = ctx.manifest?.hookRunner?.version;
+  const pin = versionOf(ctx, ctx.manifest?.hookRunner);
+  // D8 is CRITICAL, so judgment never demotes it: its newer rule is gated HERE (PLAN.md AD6).
+  // A runner version to assert against exists only from the profile that introduced
+  // `hookRunner` — below it, "manifest pins undefined" was a rule the harness never claimed.
+  if (ctx.level < SINCE.D8) {
+    r.add(
+      'D8',
+      'INFO',
+      `not applicable: a recorded hook-runner version (\`hookRunner\`) is required from profile ${SINCE.D8}; this harness is judged at ${ctx.level}`,
+    );
+    return;
+  }
+  if (typeof pin !== 'string' || !pin) {
+    r.add(
+      'D8',
+      'UNKNOWN',
+      `${ctx.manifestPath}: no resolvable \`hookRunner\` version, so there is no pin to assert the runner against (see M8)`,
+    );
+    return;
+  }
   if (!runner) {
     r.add(
       'D8',
@@ -6109,10 +5704,18 @@ function checkRunnerVersion(ctx, r) {
     return;
   }
   if (version !== pin) {
+    // Name the CAUSE when the shim fell through to PATH: that is the field failure (a global
+    // runner silently running every hook), and its fix is a pinned path, not a version bump.
+    let cause = '';
+    if (runner.source === 'PATH') {
+      cause = ctx.mergedRunnerPin
+        ? ` — the pinned runner path ${ctx.mergedRunnerPin} does not resolve, so the installed shim falls through to PATH; install the pinned runner`
+        : ' — the hook configuration pins no runner path (`lefthook:` in the ROOT config), so the installed shim runs whatever `lefthook` is first on PATH; fix: pin the runner path (contract §3.2) and re-run `lefthook install`';
+    }
     r.add(
       'D8',
       'FAIL',
-      `runner ${runner.path} (source: ${runner.source}) is ${version}, manifest pins ${pin}`,
+      `runner ${runner.path} (source: ${runner.source}) is ${version}, manifest pins ${pin}${cause}`,
     );
   } else {
     r.add(
@@ -6210,12 +5813,21 @@ function main(argv) {
 
   const recordedRaw = ctx.manifest?.constitutionVersion;
   const recorded = typeof recordedRaw === 'string' ? recordedRaw : null;
-  // Fail CLOSED: a profile this checker does not know is checked at the HIGHEST known profile,
-  // so an edited field can only ever add checks, never remove them.
   const recordedLevel =
     recorded && KNOWN_PROFILES.includes(recorded) ? Number(recorded) : CURRENT_PROFILE;
-  const level = Math.max(recordedLevel, opts.profile ? Number(opts.profile) : 0);
+  // The JUDGMENT profile (PLAN.md AD6): fail closed on a record that is missing, unparseable,
+  // from the future, or not backed by complete git history; never lower than what history or
+  // an explicit --profile target says. Profile 1 runs every check and judges none of them.
+  const judgment = judgmentProfile({
+    recorded,
+    target: opts.profile ? Number(opts.profile) : null,
+    history: manifestHistory(ctx.root, opts.noGit),
+  });
+  ctx.judgment = judgment;
+  report.judgment = judgment;
+  const level = judgment.unsupported ? CURRENT_PROFILE : judgment.profile;
   ctx.level = level;
+  ctx.pinRecords = resolveManifestPins(ctx);
 
   ctx.workflow = buildWorkflow(ctx, ctx.manifest?.ci?.workflow ?? '.github/workflows/ci.yml');
   ctx.rootHook = loadYamlArtifact(
@@ -6289,9 +5901,15 @@ function main(argv) {
     report.group = null;
   };
   track('M*', () => checkManifest(ctx, report, level));
-  track('A*', () => checkArtifacts(ctx, report, level));
+  track('A*', () => {
+    checkArtifacts(ctx, report, level);
+    checkVendoredBundle(ctx, report, level);
+  });
   if (level >= 4) track('A14/A15', () => checkOwnershipSplit(ctx, report));
-  track('W*', () => checkWiring(ctx, report, level));
+  track('W*', () => {
+    checkWiring(ctx, report, level);
+    checkBotSafeRequiredSteps(ctx, report, level);
+  });
   track('D*', () => checkDrift(ctx, report, level));
 
   // A crashed group must FAIL its checks, never silently REMOVE them: under --enforce a thrown
@@ -6304,6 +5922,7 @@ function main(argv) {
     if (!owed.length) {
       report.add('M1', 'UNKNOWN', `internal error in an unmapped check group (${label})`, {
         hard: true,
+        integrity: true,
       });
       continue;
     }
@@ -6313,6 +5932,7 @@ function main(argv) {
       if (found.some((f) => f.status === 'FAIL')) continue;
       report.add(id, 'UNKNOWN', `check did not complete: internal error in the ${label} group`, {
         hard: true,
+        integrity: true,
       });
     }
   }
@@ -6326,7 +5946,7 @@ function main(argv) {
       carrier,
       'UNKNOWN',
       `internal: ${id} is emitted by the ${group} group but is ${why}, so a crash in that group would delete it from the report`,
-      { hard: true },
+      { hard: true, integrity: true },
     );
   }
 
@@ -6342,7 +5962,7 @@ function main(argv) {
   const results = report.results();
   if (opts.format === 'json') {
     process.stdout.write(
-      `${JSON.stringify({ profile: recorded ?? 'unknown', results }, null, 2)}\n`,
+      `${JSON.stringify({ profile: recorded ?? 'unknown', judgedAt: judgment.profile, results }, null, 2)}\n`,
     );
   } else {
     for (const res of results) process.stdout.write(`${res.status} ${res.id} — ${res.evidence}\n`);

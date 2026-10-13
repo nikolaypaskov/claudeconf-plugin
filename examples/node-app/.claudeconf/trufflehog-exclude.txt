@@ -1,0 +1,4 @@
+\.git/
+package-lock\.json
+\.lock$
+node_modules/

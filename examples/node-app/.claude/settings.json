@@ -1,0 +1,56 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e 'let s=\"\";process.stdin.on(\"data\",d=>s+=d).on(\"end\",()=>{const f=(JSON.parse(s).tool_input||{}).file_path||\"\";if(/\\.(ts|tsx|js|jsx|mjs|cjs|json)$/.test(f)&&!/package-lock\\.json$/.test(f))require(\"node:child_process\").spawnSync(\"node_modules/.bin/biome\",[\"format\",\"--write\",\"--\",f],{stdio:\"ignore\",cwd:process.env.CLAUDE_PROJECT_DIR||process.cwd()})})' >/dev/null 2>&1 || true",
+            "_claudeconf": {
+              "managed": true,
+              "milestone": "format",
+              "note": "format milestone (edit tier): file-scoped autofix on the edited file only, non-blocking, silent on success. The payload is parsed by the project's own runtime and biome is invoked by its pinned project-local path rooted at CLAUDE_PROJECT_DIR — no jq, no on-demand package runner. Lockfiles are filtered out of the glob. Ownership is recorded in .claudeconf/manifest.json agentHardening.managedHooks[], which is authoritative; this marker is for human readers."
+            }
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo 'claudeconf harness, profile 6 (declared): run `node_modules/.bin/lefthook run gate` before any PR. Delegation rule: see `.claudeconf/delegation.md`.'",
+            "_claudeconf": {
+              "managed": true,
+              "advisory": "session-start",
+              "note": "agent-hardening SessionStart advisory (bounded template; declared, not verified)"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "deny": [
+      "Read(**/.env)",
+      "Edit(**/.env)",
+      "Read(**/.env.local)",
+      "Edit(**/.env.local)",
+      "Read(**/.env.*.local)",
+      "Edit(**/.env.*.local)",
+      "Read(**/secrets/**)",
+      "Edit(**/secrets/**)",
+      "Read(**/id_rsa*)",
+      "Edit(**/id_rsa*)",
+      "Read(**/id_ed25519*)",
+      "Edit(**/id_ed25519*)",
+      "Read(**/id_ecdsa*)",
+      "Edit(**/id_ecdsa*)",
+      "Read(**/*.key)",
+      "Edit(**/*.key)"
+    ],
+    "_claudeconf": "agent-hardening deny module (constitution §4.7 / agent-hardening.md §3): the recorded set is .claudeconf/manifest.json agentHardening.denyPatterns, and a re-run reconciles against THAT — entries beyond it are project-owned and survive. Patterns are `**/`-anchored so nested paths (apps/api/.env) are covered. Defense-in-depth, NOT isolation: deny governs Read/Edit only — Bash is not covered, and spawned interpreters are not covered; .env.example intentionally not denied. runtimeIsolation: not-configured."
+  }
+}

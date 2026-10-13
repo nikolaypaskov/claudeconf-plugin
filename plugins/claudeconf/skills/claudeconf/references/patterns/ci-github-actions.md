@@ -83,11 +83,13 @@ jobs:
       - name: dependency-audit (advisory)
         run: npm audit --audit-level=high || true       # REPLACE; advisory, never blocks
       # Harness infrastructure — both REQUIRED, both run in the local gate too.
+      # Both run the VENDORED bundle (contract §1) — copied verbatim, never re-authored;
+      # Node runs it in every stack, so a non-Node project still sets up Node above.
       - name: suppressions
-        run: node scripts/check-suppressions.mjs        # REPLACE: project's own runtime
+        run: node .claudeconf/bin/check-suppressions.mjs
       # `project-checks` is required even when projectChecks[] is empty.
       - name: project-checks
-        run: node scripts/check-project-checks.mjs      # REPLACE: project's own runtime
+        run: node .claudeconf/bin/check-project-checks.mjs
 
   security:
     runs-on: ubuntu-latest
@@ -122,7 +124,7 @@ jobs:
         # (constitution §4.2, contract §3.3). Provision the pinned auditor first
         # (hash-locked venv, digest-pinned image, or a SHA-pinned action) and
         # invoke it by that pinned path.
-        run: <provisioning script> && <venv>/bin/zizmor .github/workflows/
+        run: node .claudeconf/bin/provision-tools.mjs && zizmor .github/workflows/
 # <<< claudeconf managed <<<
 
   # ── Project-owned jobs go BELOW the block ───────────────────────────────────
